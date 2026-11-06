@@ -1,0 +1,13 @@
+{
+  "addonid": "top.museday.mn.writer",
+  "author": "ShenShichao",
+  "title": "MN Writer",
+  "version": "0.4.0",
+  "marginnote_version_min": "4.5.0",
+  "immersiveOnly": true,
+  "panel": "index.html",
+  "icon": "icon.png",
+  "panelWidth": 960,
+  "panelMaxHeight": 1200,
+  "events": ["excerpt", "comments", "synced", "undo", "imported"]
+}

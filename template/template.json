@@ -1,0 +1,48 @@
+{
+  "id": "u-mn-writer",
+  "name": "读写忆（写作台）",
+  "schema": 3,
+  "plugins": ["top.museday.mn.writer"],
+  "pluginConfigs": {
+    "top.museday.mn.writer": {}
+  },
+  "bottom": {
+    "modes": [
+      {
+        "id": "read",
+        "behavior": "read",
+        "overflow": [
+          "act.excerptSettingFromMore",
+          "pref.assistExcerpt",
+          "pref.excerptResultBar",
+          "choice.textSelection",
+          "choice.doubleTap",
+          "panel.childDict"
+        ]
+      },
+      {
+        "id": "write",
+        "behavior": "write",
+        "overflow": ["act.viewBlankNotebook", "pref.docsketchontop", "act.stopPencil"]
+      },
+      {
+        "id": "recall",
+        "behavior": "recall",
+        "tools": [
+          "recall.level",
+          "recall.reset",
+          "recall.hint",
+          "recall.settings",
+          "recall.handwrite",
+          "pref.reviewAutoAdd"
+        ]
+      },
+      {
+        "id": "writing",
+        "title": "写作",
+        "icon": "square.and.pencil",
+        "tools": ["addon.top.museday.mn.writer.primary"]
+      }
+    ]
+  }
+}
