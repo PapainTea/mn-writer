@@ -12,17 +12,18 @@ import { takeDraggedCard } from './editor/dragCard'
 import { createExtensions } from './editor/extensions'
 import { insertCardBlock } from './editor/insertCard'
 import { useEditorDerivedState } from './hooks/useEditorDerivedState'
-import { useSelectedCardId } from './hooks/useSelectedCardId'
+import { useSelectedCardIds } from './hooks/useSelectedCardId'
 import { useWriterDocuments } from './hooks/useWriterDocuments'
 import { getCardViewMode, setCardViewMode, subscribeCardView } from './lib/cardView'
 import { EMPTY_DOC } from './lib/document'
 import { documentTitleFromFile, parseDocumentFile } from './lib/documentFile'
 import { docToMarkdown } from './lib/markdown'
-import { pinSelectedCard } from './lib/cardOrder'
+import { pinSelectedCards } from './lib/cardOrder'
 import { filterCards } from './lib/cardSearch'
 import { countInsertedCards } from './lib/inserted'
 import { jumpToOutline } from './lib/outline'
-import { applyPanelSize, readStoredPanelSize } from './lib/panelSize'
+import { usePanelSizeRestore } from './hooks/usePanelSizeRestore'
+import { isCompactLayout, watchCompactLayout } from './lib/layout'
 import { loadTheme, persistTheme, type ThemeMode } from './lib/storage'
 import { subscribeToast } from './lib/toast'
 import { getAdapter } from './mn'
@@ -46,7 +47,7 @@ function safeFilename(title: string): string {
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme())
-  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia('(min-width: 960px)').matches)
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isCompactLayout())
   const [sidebarTab, setSidebarTab] = useState<'docs' | 'cards' | 'outline'>('cards')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [focusMode, setFocusMode] = useState(false)
@@ -57,6 +58,7 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false)
 
   const adapter = useMemo(() => getAdapter(), [])
+  usePanelSizeRestore()
   const cardView = useSyncExternalStore(subscribeCardView, getCardViewMode, getCardViewMode)
   const connection = useSyncExternalStore(
     adapter.subscribeConnection,
@@ -180,23 +182,8 @@ export default function App() {
   }, [refreshCards])
 
   useEffect(() => {
-    // 页面加载完成后恢复上次的面板尺寸，MarginNote 会在加载完成时调用一次 fit。
-    const restore = () => {
-      const stored = readStoredPanelSize()
-      if (stored) applyPanelSize(stored)
-    }
-    window.addEventListener('load', restore, { once: true })
-    const timer = window.setTimeout(restore, 600)
-    return () => {
-      window.removeEventListener('load', restore)
-      window.clearTimeout(timer)
-    }
-  }, [])
-
-  useEffect(() => {
-    const media = window.matchMedia('(max-width: 959px)')
-    const handleChange = (event: MediaQueryListEvent) => {
-      if (event.matches) {
+    const unwatch = watchCompactLayout((compact) => {
+      if (compact) {
         autoClosedRef.current = true
         setSidebarOpen(false)
         return
@@ -205,16 +192,15 @@ export default function App() {
         autoClosedRef.current = false
         setSidebarOpen(true)
       }
-    }
-    media.addEventListener('change', handleChange)
-    return () => media.removeEventListener('change', handleChange)
+    })
+    return unwatch
   }, [])
 
-  const selectedCardId = useSelectedCardId(!focusMode && connection.state === 'connected')
+  const selectedCardIds = useSelectedCardIds(!focusMode && connection.state === 'connected')
 
   const cards = useMemo(
-    () => pinSelectedCard(filterCards(allCards, cardQuery), selectedCardId),
-    [allCards, cardQuery, selectedCardId],
+    () => pinSelectedCards(filterCards(allCards, cardQuery), selectedCardIds),
+    [allCards, cardQuery, selectedCardIds],
   )
 
   useEffect(
@@ -283,7 +269,7 @@ export default function App() {
           : `已插入「${card.title}」`,
       )
       setPickerOpen(false)
-      if (window.matchMedia('(max-width: 959px)').matches) setSidebarOpen(false)
+      if (isCompactLayout()) setSidebarOpen(false)
     },
     [editor, syncDerivedState],
   )
@@ -351,7 +337,7 @@ export default function App() {
   const handleSelectDocument = useCallback(
     (id: string) => {
       selectDocument(id)
-      if (window.matchMedia('(max-width: 959px)').matches) setSidebarOpen(false)
+      if (isCompactLayout()) setSidebarOpen(false)
     },
     [selectDocument],
   )
@@ -359,7 +345,7 @@ export default function App() {
   const handleNewDocument = useCallback(() => {
     newDocument()
     setSidebarTab('docs')
-    if (window.matchMedia('(max-width: 959px)').matches) setSidebarOpen(false)
+    if (isCompactLayout()) setSidebarOpen(false)
   }, [newDocument])
 
   const toggleCardView = useCallback(() => {
@@ -370,7 +356,7 @@ export default function App() {
     (item: OutlineItem) => {
       if (!editor) return
       jumpToOutline(editor, item)
-      if (window.matchMedia('(max-width: 959px)').matches) setSidebarOpen(false)
+      if (isCompactLayout()) setSidebarOpen(false)
     },
     [editor],
   )
@@ -439,7 +425,7 @@ export default function App() {
         const title = documentTitleFromFile(file.name)
         const imported = importDocument(title, content)
         setSidebarTab('docs')
-        if (window.matchMedia('(max-width: 959px)').matches) setSidebarOpen(false)
+        if (isCompactLayout()) setSidebarOpen(false)
         setToast(`已恢复「${imported.title}」`)
       } catch (error) {
         setToast(error instanceof Error ? error.message : '导入失败，请检查文件内容')
@@ -471,7 +457,7 @@ export default function App() {
             onInsertCard={insertCard}
             onSelectOutline={selectOutline}
             onClose={() => setSidebarOpen(false)}
-            selectedCardId={selectedCardId}
+            selectedCardIds={selectedCardIds}
           />
           <button
             type="button"
@@ -493,6 +479,7 @@ export default function App() {
             theme={theme}
             cardView={cardView}
             hasCards={insertedCounts.size > 0}
+            sidebarOpen={sidebarOpen}
             onToggleSidebar={() => {
               autoClosedRef.current = false
               setSidebarOpen((value) => !value)
@@ -505,7 +492,6 @@ export default function App() {
             onDownloadMarkdown={copyMarkdownFile}
             onDownloadJson={downloadJson}
             onImportJson={importJson}
-            studySetTitle={connection.state === 'connected' ? (connection.topicTitle ?? null) : null}
             refreshing={refreshing}
             onRefreshCards={() => void refreshAllCards()}
           />
@@ -540,7 +526,7 @@ export default function App() {
         loading={loadingCards}
         onClose={() => setPickerOpen(false)}
         onInsert={insertCard}
-        selectedCardId={selectedCardId}
+        selectedCardIds={selectedCardIds}
       />
 
       {toast && <div className="toast">{toast}</div>}

@@ -3,14 +3,13 @@ import { getAdapter } from '../mn'
 import { onNativeSelection } from '../mn/native'
 
 /**
- * 轮询 MarginNote 的界面状态，跟踪当前聚焦的卡片。
+ * 跟踪 MarginNote 中当前选中的卡片。
  *
- * 官方事件清单没有卡片选中事件，混合形态插件可以读取原生选区，
- * 面板形态只能依靠界面状态轮询。轮询在同时满足以下条件时暂停：
- * 页面不可见、专注模式开启。同一时间只允许一个请求在途。
+ * 混合形态插件读取原生选区并接收 `SelectionChanged` 通知；
+ * 面板形态退回到界面状态读取。页面不可见或专注模式开启时暂停。
  */
-export function useSelectedCardId(enabled: boolean): string | null {
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+export function useSelectedCardIds(enabled: boolean): string[] {
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const inFlight = useRef(false)
   const sequence = useRef(0)
 
@@ -19,9 +18,14 @@ export function useSelectedCardId(enabled: boolean): string | null {
 
     let disposed = false
 
-    const apply = (id: string | null) => {
+    const apply = (ids: string[]) => {
       if (disposed) return
-      setSelectedId((previous) => (previous === id ? previous : id))
+      setSelectedIds((previous) => {
+        if (previous.length === ids.length && previous.every((id, index) => id === ids[index])) {
+          return previous
+        }
+        return ids
+      })
     }
 
     const read = async () => {
@@ -33,9 +37,9 @@ export function useSelectedCardId(enabled: boolean): string | null {
       const ticket = sequence.current + 1
       sequence.current = ticket
       try {
-        const id = await getAdapter().getSelectedCardId()
+        const ids = await getAdapter().getSelectedCardIds()
         if (disposed || ticket !== sequence.current) return
-        apply(id)
+        apply(ids)
       } catch {
         // 读取失败时保留上一次的选中卡片，等待下一次事件或聚焦。
       } finally {
@@ -48,7 +52,7 @@ export function useSelectedCardId(enabled: boolean): string | null {
     }
 
     const unsubscribe = onNativeSelection((noteIds) => {
-      apply(noteIds[0] ?? null)
+      apply(noteIds)
     })
     window.addEventListener('focus', read)
     document.addEventListener('visibilitychange', onVisibilityChange)
@@ -63,5 +67,5 @@ export function useSelectedCardId(enabled: boolean): string | null {
     }
   }, [enabled])
 
-  return selectedId
+  return selectedIds
 }

@@ -1,7 +1,7 @@
 import type { WriterDocument } from '../types'
 import { callNative, nativeBridgeAvailable } from '../mn/native'
 import { normalizeContent } from './normalizeCard'
-import { createSeedDocument } from './seed'
+import { createSeedDocument, SEED_VERSION } from './seed'
 
 export const STORAGE_KEYS = {
   documents: 'mn-writer:documents:v1',
@@ -101,7 +101,12 @@ export function loadDocuments(): WriterDocument[] {
     if (raw) {
       const parsed = JSON.parse(raw) as WriterDocument[]
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((doc) => ({ ...doc, content: normalizeContent(doc.content) }))
+        const seed = createSeedDocument()
+        return parsed.map((doc) => {
+          // 内置演示文稿的版本落后时替换为当前版本，用户自己的文稿保持原样。
+          if (doc.id === seed.id && (doc.seedVersion ?? 0) < SEED_VERSION) return seed
+          return { ...doc, content: normalizeContent(doc.content) }
+        })
       }
     }
   } catch {

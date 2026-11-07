@@ -139,21 +139,22 @@ export function createBridgeAdapter(): MnAdapter {
         return []
       }
     },
-    async getSelectedCardId() {
+    async getSelectedCardIds() {
       if (nativeBridgeAvailable()) {
         try {
           const result = await callNative<{ noteIds?: string[] }>('selection:list')
-          const noteId = Array.isArray(result?.noteIds) ? result.noteIds[0] : undefined
-          return noteId?.trim() || null
+          const ids = Array.isArray(result?.noteIds) ? result.noteIds : []
+          return ids.map((id) => String(id).trim()).filter(Boolean)
         } catch {
           // 原生选区读取失败时回落到界面状态接口。
         }
       }
       try {
         const ui = await callBridge<UiState>('/ui-state')
-        return ui.state?.focusnoteid?.trim() || null
+        const focused = ui.state?.focusnoteid?.trim()
+        return focused ? [focused] : []
       } catch {
-        return null
+        return []
       }
     },
     focusCard(id: string) {

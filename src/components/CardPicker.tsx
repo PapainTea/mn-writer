@@ -1,7 +1,7 @@
 import { Check, CircleDot, CornerDownLeft, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cardColorIndex } from '../editor/cardColors'
-import { pinSelectedCard } from '../lib/cardOrder'
+import { pinSelectedCards } from '../lib/cardOrder'
 import { filterCards } from '../lib/cardSearch'
 import { cardSummary } from '../lib/cardSummary'
 import type { MnCard } from '../types'
@@ -13,7 +13,7 @@ interface CardPickerProps {
   loading: boolean
   onClose: () => void
   onInsert: (card: MnCard) => void
-  selectedCardId: string | null
+  selectedCardIds: string[]
 }
 
 export function CardPicker({
@@ -23,15 +23,15 @@ export function CardPicker({
   loading,
   onClose,
   onInsert,
-  selectedCardId,
+  selectedCardIds,
 }: CardPickerProps) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const filtered = useMemo(
-    () => pinSelectedCard(filterCards(cards, query), selectedCardId),
-    [cards, query, selectedCardId],
+    () => pinSelectedCards(filterCards(cards, query), selectedCardIds),
+    [cards, query, selectedCardIds],
   )
 
   useEffect(() => {
@@ -116,7 +116,7 @@ export function CardPicker({
           {filtered.map((card, index) => {
             const inserted = insertedCounts.get(card.id) ?? 0
             const summary = cardSummary(card)
-            const isCurrent = card.id === selectedCardId
+            const isCurrent = selectedCardIds.includes(card.id)
             return (
               <button
                 type="button"

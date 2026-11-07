@@ -37,7 +37,7 @@ interface SidebarProps {
   onInsertCard: (card: MnCard) => void
   onSelectOutline: (item: OutlineItem) => void
   onClose: () => void
-  selectedCardId: string | null
+  selectedCardIds: string[]
 }
 
 interface ConnectionFooter {
@@ -114,7 +114,7 @@ export function Sidebar({
   onInsertCard,
   onSelectOutline,
   onClose,
-  selectedCardId,
+  selectedCardIds,
 }: SidebarProps) {
   const footer = connectionFooter(connection)
 
@@ -205,7 +205,7 @@ export function Sidebar({
               const inserted = insertedCounts.get(card.id) ?? 0
               const summary = cardSummary(card)
               const tags = card.tags.slice(0, 2)
-              const isCurrent = card.id === selectedCardId
+              const isCurrent = selectedCardIds.includes(card.id)
               return (
                 <button
                   type="button"

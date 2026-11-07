@@ -75,3 +75,38 @@ export function replaceCardWithText(
   editor.view.dispatch(tr)
   return true
 }
+
+/**
+ * 生成 Pandoc BibTeX 引用文本。
+ *
+ * 页码来自卡片所属文档的位置；没有页码时只写引用键。
+ */
+export function citationText(card: MnCard): string | null {
+  const key = card.citationKey?.trim()
+  if (!key) return null
+  const page = typeof card.page === 'number' && card.page > 0 ? `, p. ${card.page}` : ''
+  return `[@${key}${page}]`
+}
+
+/**
+ * 把一张卡片替换为正文段落，并在末尾追加引用。
+ *
+ * 卡片没有引用键时不转换，调用方据此提示原因。
+ */
+export function replaceCardWithCitation(
+  editor: Editor,
+  pos: number,
+  node: ProseMirrorNode,
+  card: MnCard,
+): boolean {
+  const citation = citationText(card)
+  if (!citation) return false
+  const paragraphs = cardToParagraphs(editor, card)
+  const paragraph = editor.schema.nodes.paragraph
+  if (!paragraph) return false
+  paragraphs.push(paragraph.create(null, editor.schema.text(citation)))
+
+  const tr = editor.state.tr.replaceWith(pos, pos + node.nodeSize, Fragment.fromArray(paragraphs))
+  editor.view.dispatch(tr)
+  return true
+}

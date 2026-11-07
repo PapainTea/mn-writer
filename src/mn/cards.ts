@@ -1,5 +1,9 @@
-import type { CardKind, CommentFormat, MnCard, MnComment } from '../types'
+import type { CardKind, MnCard } from '../types'
 import { callBridge, readCapabilities, type Capabilities } from './client'
+import { cardTexts, readComments, readExcerpt, readRichHtml } from './cardText'
+import { callNative, nativeBridgeAvailable } from './native'
+import { loadCitekeyIndex } from './zoteroIndex'
+import { readZoteroMeta } from './zoteroMeta'
 
 interface MindNode {
   noteid: string
@@ -30,6 +34,7 @@ interface TextItem {
   index: number
   text?: string
   excerpt?: boolean
+  kind?: string
 }
 
 export interface NoteItem {
@@ -38,6 +43,7 @@ export interface NoteItem {
   title?: string
   preview?: string
   texts?: TextItem[]
+  parts?: Array<{ index?: number; text?: string; kind?: string; excerpt?: boolean }>
   comments?: Array<{ text?: string; type?: string }>
   hashtags?: string[]
   metadata?: { colorIndex?: number }
@@ -52,20 +58,6 @@ export interface BatchResult {
 const TREE_PAGE_LIMIT = 500
 const TREE_MAX_PAGES = 40
 const NOTE_BATCH_LIMIT = 200
-
-const COMMENT_FORMATS: Record<string, CommentFormat> = {
-  text: 'text',
-  plain: 'text',
-  markdown: 'markdown',
-  md: 'markdown',
-  html: 'html',
-  rich: 'rich',
-}
-
-function readCommentFormat(value: unknown): CommentFormat {
-  if (typeof value !== 'string') return 'text'
-  return COMMENT_FORMATS[value.toLowerCase()] ?? 'text'
-}
 
 function chunk<T>(items: T[], size: number): T[][] {
   const result: T[][] = []
@@ -125,7 +117,24 @@ async function batchGet(noteIds: string[], batchSize: number): Promise<NoteItem[
   return results.flatMap((result) => result.items ?? [])
 }
 
-function readCitationKey(card: NoteItem): string | undefined {
+export async function loadCitationKeys(): Promise<Record<string, string>> {
+  if (!nativeBridgeAvailable()) return {}
+  const values: Record<string, string> = {}
+  try {
+    const result = await callNative<{ values?: Record<string, string> }>('citekey:list')
+    Object.assign(values, result?.values ?? {})
+  } catch {
+    // 读不到共享缓存时只用 Zotero 索引。
+  }
+  const index = await loadCitekeyIndex()
+  return { ...values, ...index }
+}
+
+function readCitationKey(
+  card: NoteItem,
+  citekeys: Record<string, string> = {},
+  docMd5?: string,
+): string | undefined {
   for (const value of Object.values(card.addonValues ?? {})) {
     if (typeof value === 'string') {
       try {
@@ -141,16 +150,13 @@ function readCitationKey(card: NoteItem): string | undefined {
       if (typeof record.zoteroKey === 'string') return record.zoteroKey
     }
   }
+  const meta = readZoteroMeta(cardTexts(card))
+  if (meta?.citationKey) return meta.citationKey
+  if (meta?.itemKey && citekeys[meta.itemKey]) return citekeys[meta.itemKey]
+  if (meta?.docMd5 && citekeys[meta.docMd5]) return citekeys[meta.docMd5]
+  if (docMd5 && citekeys[docMd5]) return citekeys[docMd5]
   const tag = card.hashtags?.find((item) => item.startsWith('cite:'))
   return tag?.slice('cite:'.length)
-}
-
-function readExcerpt(card: NoteItem): string {
-  const excerpts = (card.texts ?? []).filter((item) => item.excerpt && item.text?.trim())
-  if (excerpts.length > 0) {
-    return excerpts.map((item) => item.text?.trim()).filter(Boolean).join('\n\n')
-  }
-  return (card.texts ?? []).map((item) => item.text?.trim()).find(Boolean) ?? card.preview ?? ''
 }
 
 function readKind(card: NoteItem): CardKind {
@@ -163,26 +169,26 @@ function readKind(card: NoteItem): CardKind {
   return 'note'
 }
 
-function readComments(card: NoteItem): MnComment[] {
-  return (card.comments ?? [])
-    .map((item) => ({
-      text: item.text?.trim() ?? '',
-      format: readCommentFormat(item.type),
-    }))
-    .filter((comment) => comment.text.length > 0)
-}
-
-function toCard(card: NoteItem, node: MindNode | undefined, docTitle: string | undefined): MnCard {
+function toCard(
+  card: NoteItem,
+  node: MindNode | undefined,
+  docTitle: string | undefined,
+  citekeys: Record<string, string> = {},
+  docMd5?: string,
+): MnCard {
   const page = card.sourceAnchor?.page ?? node?.docPage
+  const excerpt = readExcerpt(card)
+  const richHtml = readRichHtml(card)
   return {
     id: card.noteid ?? node?.noteid ?? '',
     title: card.title?.trim() || node?.title?.trim() || card.preview?.trim() || '未命名卡片',
-    excerpt: readExcerpt(card),
-    comments: readComments(card),
+    excerpt,
+    excerptHtml: richHtml,
+    comments: readComments(card, excerpt),
     tags: card.hashtags ?? [],
     page: typeof page === 'number' ? page : undefined,
     documentTitle: docTitle,
-    citationKey: readCitationKey(card),
+    citationKey: readCitationKey(card, citekeys, docMd5),
     colorIndex: card.metadata?.colorIndex,
     kind: readKind(card),
   }
@@ -203,17 +209,22 @@ export async function loadStudySetCards(
   )
 
   const batchSize = capabilities.noteMetadata?.maxNoteIds ?? NOTE_BATCH_LIMIT
-  const items = await batchGet(
-    tree.nodes.map((node) => node.noteid),
-    batchSize,
-  )
+  const [items, citekeys] = await Promise.all([
+    batchGet(
+      tree.nodes.map((node) => node.noteid),
+      batchSize,
+    ),
+    loadCitationKeys(),
+  ])
 
   const cards: MnCard[] = []
   for (const item of items) {
     if (!item.found || !item.noteid) continue
     const node = nodeById.get(item.noteid)
     const bookmd5 = item.sourceAnchor?.bookmd5 ?? node?.docBookmd5
-    cards.push(toCard(item, node, bookmd5 ? docTitles.get(bookmd5) : undefined))
+    cards.push(
+      toCard(item, node, bookmd5 ? docTitles.get(bookmd5) : undefined, citekeys, bookmd5),
+    )
   }
   return { cards, truncated: tree.truncated }
 }
@@ -227,9 +238,10 @@ export async function loadCards(
 
   const capabilities = await readCapabilities()
   const batchSize = capabilities.noteMetadata?.maxNoteIds ?? NOTE_BATCH_LIMIT
-  const [items, documents] = await Promise.all([
+  const [items, documents, citekeys] = await Promise.all([
     batchGet(unique, batchSize),
     topicId ? loadDocuments(topicId) : Promise.resolve<DocumentItem[]>([]),
+    loadCitationKeys(),
   ])
 
   const docTitles = new Map(
@@ -242,7 +254,9 @@ export async function loadCards(
   for (const item of items) {
     if (!item.found || !item.noteid) continue
     const bookmd5 = item.sourceAnchor?.bookmd5
-    cards.push(toCard(item, undefined, bookmd5 ? docTitles.get(bookmd5) : undefined))
+    cards.push(
+      toCard(item, undefined, bookmd5 ? docTitles.get(bookmd5) : undefined, citekeys, bookmd5),
+    )
   }
   return cards
 }

@@ -178,8 +178,8 @@ export function createMockAdapter(): MnAdapter {
       const wanted = new Set(ids)
       return cards.filter((card) => wanted.has(card.id))
     },
-    async getSelectedCardId() {
-      return null
+    async getSelectedCardIds() {
+      return []
     },
     focusCard() {
       // 浏览器演示模式没有 MarginNote 可定位，保留为空实现。

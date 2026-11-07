@@ -6,15 +6,17 @@ import {
   ExternalLink,
   GripVertical,
   MoreHorizontal,
+  Quote,
   RefreshCw,
   Trash2,
   Type,
 } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
-import { replaceCardWithText } from './cardToText'
+import { replaceCardWithCitation, replaceCardWithText } from './cardToText'
 import { getCardViewMode, subscribeCardView } from '../lib/cardView'
 import { CARD_KIND_LABEL, cardSummary } from '../lib/cardSummary'
 import { CommentBody } from '../lib/commentRender'
+import { RichContent } from '../lib/RichContent'
 import { showToast } from '../lib/toast'
 import { getAdapter } from '../mn'
 import type { MnCard } from '../types'
@@ -142,6 +144,30 @@ export function CardNodeView({
     showToast('卡片已转为文本')
   }
 
+  /** 把卡片替换为正文段落，并在末尾留下 Pandoc 引用。 */
+  const convertToCitation = () => {
+    setMenuOpen(false)
+    if (!card.citationKey) {
+      showToast('该卡片没有引用键，无法转为引用')
+      return
+    }
+    const pos = getPos()
+    if (typeof pos !== 'number' || pos < 0) {
+      showToast('转换失败，请稍后重试')
+      return
+    }
+    const current = editor.state.doc.nodeAt(pos)
+    if (!current || current.type.name !== 'cardBlock') {
+      showToast('转换失败，请稍后重试')
+      return
+    }
+    if (!replaceCardWithCitation(editor, pos, current, card)) {
+      showToast('转换失败，请稍后重试')
+      return
+    }
+    showToast('卡片已转为引用')
+  }
+
   const tools = (
     <div className="mn-card-tools">
       {viewMode === 'compact' && expanded && (
@@ -185,6 +211,11 @@ export function CardNodeView({
           <button type="button" role="menuitem" onClick={convertToText}>
             <Type size={14} /> 转为文本
           </button>
+          {card.citationKey && (
+            <button type="button" role="menuitem" onClick={convertToCitation}>
+              <Quote size={14} /> 转为引用
+            </button>
+          )}
           <button type="button" role="menuitem" onClick={copyCitation}>
             <Copy size={14} /> 复制引用
           </button>
@@ -209,7 +240,6 @@ export function CardNodeView({
           <span className="mn-card-grip" data-drag-handle title="拖动卡片">
             <GripVertical size={15} strokeWidth={1.8} />
           </span>
-          <span className="mn-card-kind">{CARD_KIND_LABEL[card.kind]}</span>
           <button
             type="button"
             className="mn-card-compact-main"
@@ -217,9 +247,10 @@ export function CardNodeView({
             title="展开卡片"
           >
             <span className="mn-card-compact-title">{summary.title}</span>
-            {summary.source && <span className="mn-card-compact-source">{summary.source}</span>}
+            {summary.excerpt && (
+              <span className="mn-card-compact-excerpt">{summary.excerpt}</span>
+            )}
           </button>
-          {card.citationKey && <span className="mn-card-cite">@{card.citationKey}</span>}
           <button
             type="button"
             className="mn-icon-button mn-card-expand"
@@ -245,9 +276,15 @@ export function CardNodeView({
           <h3 className="mn-card-title">{summary.title}</h3>
           {summary.excerpt && (
             <>
-              <p className={`mn-card-excerpt${excerptExpanded ? ' is-expanded' : ''}`}>
-                {summary.excerpt}
-              </p>
+              {card.excerptHtml ? (
+                <div className={`mn-card-excerpt is-rich${excerptExpanded ? ' is-expanded' : ''}`}>
+                  <RichContent html={card.excerptHtml} className="mn-card-rich" />
+                </div>
+              ) : (
+                <p className={`mn-card-excerpt${excerptExpanded ? ' is-expanded' : ''}`}>
+                  {summary.excerpt}
+                </p>
+              )}
               {longExcerpt && (
                 <button
                   type="button"

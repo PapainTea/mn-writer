@@ -5,7 +5,7 @@ import {
   FileJson,
   FileOutput,
   FileText,
-  Focus,
+  Feather,
   LayoutGrid,
   Monitor,
   Moon,
@@ -30,6 +30,7 @@ interface TopBarProps {
   theme: ThemeMode
   cardView: CardViewMode
   hasCards: boolean
+  sidebarOpen: boolean
   onToggleSidebar: () => void
   onOpenPicker: () => void
   onToggleFocus: () => void
@@ -39,7 +40,6 @@ interface TopBarProps {
   onDownloadMarkdown: () => void
   onDownloadJson: () => void
   onImportJson: (file: File) => void
-  studySetTitle: string | null
   refreshing: boolean
   onRefreshCards: () => void
 }
@@ -73,6 +73,7 @@ export function TopBar({
   theme,
   cardView,
   hasCards,
+  sidebarOpen,
   onToggleSidebar,
   onOpenPicker,
   onToggleFocus,
@@ -82,7 +83,6 @@ export function TopBar({
   onDownloadMarkdown,
   onDownloadJson,
   onImportJson,
-  studySetTitle,
   refreshing,
   onRefreshCards,
 }: TopBarProps) {
@@ -116,7 +116,14 @@ export function TopBar({
 
   return (
     <header className="topbar">
-      <button type="button" className="mn-icon-button topbar-icon" onClick={onToggleSidebar} title="切换侧栏">
+      <button
+        type="button"
+        className="mn-icon-button topbar-icon"
+        onClick={onToggleSidebar}
+        title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
+        aria-label={sidebarOpen ? '收起侧栏' : '展开侧栏'}
+        aria-expanded={sidebarOpen}
+      >
         <PanelLeft size={18} strokeWidth={1.8} />
       </button>
 
@@ -141,14 +148,6 @@ export function TopBar({
           </span>
           <span className="meta-sep">·</span>
           <span>{wordCount.toLocaleString('zh-CN')} 字</span>
-          {studySetTitle && (
-            <>
-              <span className="meta-sep">·</span>
-              <span className="doc-study-set" title={`学习集：${studySetTitle}`}>
-                学习集：{studySetTitle}
-              </span>
-            </>
-          )}
         </div>
       </div>
 
@@ -234,7 +233,7 @@ export function TopBar({
             title={`进入专注（${FOCUS_SHORTCUT}）`}
             aria-label="进入专注"
           >
-            <Focus size={17} strokeWidth={1.8} />
+            <Feather size={17} strokeWidth={1.8} />
           </button>
           <div className="export-wrap" ref={exportRef}>
             <button
@@ -352,7 +351,7 @@ export function TopBar({
                   setMoreOpen(false)
                 }}
               >
-                <Focus size={15} strokeWidth={1.8} />
+                <Feather size={15} strokeWidth={1.8} />
                 进入专注
               </button>
               <div className="mn-card-menu-sep" />

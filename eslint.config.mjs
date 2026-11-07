@@ -34,6 +34,8 @@ const NATIVE_GLOBALS = [
   "__MN_WRITER_SELECTION__",
   "__MN_WRITER_STORAGE__",
   "__MN_WRITER_PANEL__",
+  "__MN_WRITER_LAYOUT__",
+  "__MN_WRITER_CITEKEY__",
   "createPanelAddon",
   "console",
 ];

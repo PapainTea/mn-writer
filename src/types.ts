@@ -13,6 +13,8 @@ export interface MnCard {
   id: string
   title: string
   excerpt: string
+  /** 卡片自带的富文本 HTML；存在时优先按 HTML 渲染。 */
+  excerptHtml?: string
   comments: MnComment[]
   tags: string[]
   page?: number
@@ -29,6 +31,8 @@ export interface WriterDocument {
   content: JSONContent
   createdAt: number
   updatedAt: number
+  /** 内置演示文稿的版本号，用于在模板更新时替换旧版本。 */
+  seedVersion?: number
 }
 
 export interface OutlineItem {
@@ -57,7 +61,7 @@ export interface MnAdapter {
   readonly kind: 'mock' | 'bridge'
   listCards(query?: string): Promise<MnCard[]>
   getCards(ids: string[]): Promise<MnCard[]>
-  getSelectedCardId(): Promise<string | null>
+  getSelectedCardIds(): Promise<string[]>
   focusCard(id: string): void
   getConnection(): MnConnection
   subscribeConnection(listener: () => void): () => void

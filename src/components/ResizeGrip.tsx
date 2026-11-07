@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   applyPanelSize,
   clampPanelSize,
   currentPanelSize,
+  markCustomPanelSize,
+  nextPanelSize,
   storePanelSize,
   type PanelSize,
 } from '../lib/panelSize'
@@ -13,13 +15,14 @@ interface DragState {
   startY: number
   startWidth: number
   startHeight: number
+  moved: boolean
 }
 
 const KEYBOARD_STEP = 40
 const LIVE_APPLY_INTERVAL = 60
+const DRAG_THRESHOLD = 4
 
 export function ResizeGrip() {
-  const [preview, setPreview] = useState<PanelSize | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const frameRef = useRef<number | null>(null)
   const pendingRef = useRef<PanelSize | null>(null)
@@ -50,6 +53,12 @@ export function ResizeGrip() {
     [flush],
   )
 
+  const cyclePreset = useCallback(() => {
+    const next = nextPanelSize()
+    applyPanelSize(next)
+    storePanelSize(next)
+  }, [])
+
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const size = currentPanelSize()
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -59,18 +68,21 @@ export function ResizeGrip() {
       startY: event.clientY,
       startWidth: size.width,
       startHeight: size.height,
+      moved: false,
     }
-    setPreview(size)
   }
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
     if (!drag) return
+    const deltaX = event.clientX - drag.startX
+    const deltaY = event.clientY - drag.startY
+    if (!drag.moved && Math.hypot(deltaX, deltaY) < DRAG_THRESHOLD) return
+    drag.moved = true
     const next = clampPanelSize({
-      width: drag.startWidth + (event.clientX - drag.startX),
-      height: drag.startHeight + (event.clientY - drag.startY),
+      width: drag.startWidth + deltaX,
+      height: drag.startHeight + deltaY,
     })
-    setPreview(next)
     schedule(next)
   }
 
@@ -81,15 +93,17 @@ export function ResizeGrip() {
       cancelAnimationFrame(frameRef.current)
       frameRef.current = null
     }
-    if (drag) {
+    if (drag?.moved) {
       const next = clampPanelSize({
         width: drag.startWidth + (event.clientX - drag.startX),
         height: drag.startHeight + (event.clientY - drag.startY),
       })
       applyPanelSize(next)
       storePanelSize(next)
+      markCustomPanelSize()
+    } else if (drag) {
+      cyclePreset()
     }
-    setPreview(null)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
@@ -98,6 +112,11 @@ export function ResizeGrip() {
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const step = event.shiftKey ? KEYBOARD_STEP * 2 : KEYBOARD_STEP
     const current = currentPanelSize()
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      cyclePreset()
+      return
+    }
     let next: PanelSize | null = null
     if (event.key === 'ArrowRight') next = { width: current.width + step, height: current.height }
     if (event.key === 'ArrowLeft') next = { width: current.width - step, height: current.height }
@@ -108,28 +127,21 @@ export function ResizeGrip() {
     const target = clampPanelSize(next)
     applyPanelSize(target)
     storePanelSize(target)
-    setPreview(target)
+    markCustomPanelSize()
   }
 
   return (
-    <>
-      {preview ? (
-        <output className="resize-badge">
-          {preview.width} × {preview.height}
-        </output>
-      ) : null}
-      <div
+    <div
         className="resize-grip"
         role="button"
         tabIndex={0}
         aria-label="调整面板大小"
-        title="拖动调整面板大小"
+        title="拖动调整大小，轻按切换预设尺寸"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onKeyDown={handleKeyDown}
-      />
-    </>
+      onKeyDown={handleKeyDown}
+    />
   )
 }
