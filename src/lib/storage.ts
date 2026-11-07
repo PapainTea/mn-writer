@@ -11,7 +11,13 @@ export const STORAGE_KEYS = {
   panelSize: 'mn-writer:panel-size',
 } as const
 
-const ALL_KEYS = Object.values(STORAGE_KEYS)
+/** 写在 NSUserDefaults 里的轻量设置。 */
+const PREFERENCE_KEYS = [
+  STORAGE_KEYS.activeId,
+  STORAGE_KEYS.theme,
+  STORAGE_KEYS.cardView,
+  STORAGE_KEYS.panelSize,
+]
 const DOCS_KEY = STORAGE_KEYS.documents
 const ACTIVE_KEY = STORAGE_KEYS.activeId
 const THEME_KEY = STORAGE_KEYS.theme
@@ -44,7 +50,10 @@ function writeNativeValue(key: string, value: string | null): void {
 }
 
 /**
- * 读取 NSUserDefaults 中的文稿数据，并把浏览器缓存作为迁移来源。
+ * 读取文稿数据与设置。
+ *
+ * 文稿数据保存在应用文档目录下的文件里，设置留在 NSUserDefaults。
+ * 没有原生桥接时，全部数据落在浏览器本地存储。
  * React 渲染前调用一次，之后的读取都走同步内存缓存。
  */
 export function bootstrapStorage(): Promise<void> {
@@ -56,17 +65,32 @@ export function bootstrapStorage(): Promise<void> {
       try {
         const result = await callNative<{ values?: Record<string, string> }>(
           'storage:load',
-          { keys: ALL_KEYS },
+          { keys: PREFERENCE_KEYS },
           4_000,
         )
         for (const [key, value] of Object.entries(result?.values ?? {})) {
           if (typeof value === 'string') values.set(key, value)
         }
       } catch {
-        // 原生存储读取失败时按空文稿启动，避免覆盖已经保存的数据。
+        // 设置读取失败时按默认值启动。
+      }
+      try {
+        const result = await callNative<{ value?: string | null }>(
+          'documents:load',
+          undefined,
+          8_000,
+        )
+        if (typeof result?.value === 'string') values.set(DOCS_KEY, result.value)
+      } catch {
+        // 文稿读取失败时按空文稿启动，避免覆盖已经保存的数据。
+      }
+      if (!values.has(DOCS_KEY)) {
+        // 文件读取失败时沿用浏览器里的备份。
+        const backup = readLocalValue(DOCS_KEY)
+        if (backup !== null) values.set(DOCS_KEY, backup)
       }
     } else {
-      for (const key of ALL_KEYS) {
+      for (const key of [...PREFERENCE_KEYS, DOCS_KEY]) {
         const value = readLocalValue(key)
         if (value !== null) values.set(key, value)
       }
@@ -117,7 +141,16 @@ export function loadDocuments(): WriterDocument[] {
 
 export function persistDocuments(documents: WriterDocument[]): boolean {
   try {
-    return writeStoredValue(DOCS_KEY, JSON.stringify(documents))
+    const value = JSON.stringify(documents)
+    if (nativeBridgeAvailable()) {
+      // 文稿写入应用文档目录下的文件，不占用 NSUserDefaults。
+      void callNative('documents:save', { value }).catch(() => {
+        // 文件写入失败时退到浏览器本地存储，避免丢失已写内容。
+        writeLocalValue(DOCS_KEY, value)
+      })
+      return true
+    }
+    return writeStoredValue(DOCS_KEY, value)
   } catch {
     // 本地存储写满时保留当前内存状态，调用方负责提示导出备份。
     return false

@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { CardViewMode } from '../lib/cardView'
-import { countText } from '../lib/format'
+import { collectDocumentStats } from '../lib/documentStats'
 import type { ThemeMode } from '../lib/storage'
 
 interface TopBarProps {
@@ -40,6 +40,7 @@ interface TopBarProps {
   onDownloadMarkdown: () => void
   onDownloadJson: () => void
   onImportJson: (file: File) => void
+  onOpenStats: () => void
   refreshing: boolean
   onRefreshCards: () => void
 }
@@ -83,6 +84,7 @@ export function TopBar({
   onDownloadMarkdown,
   onDownloadJson,
   onImportJson,
+  onOpenStats,
   refreshing,
   onRefreshCards,
 }: TopBarProps) {
@@ -99,7 +101,7 @@ export function TopBar({
       editor,
       selector: ({ editor: current }) => {
         if (!current || current.isDestroyed || !current.state?.schema) return 0
-        return countText(current.getText())
+        return collectDocumentStats(current.getJSON()).words
       },
     }) ?? 0
 
@@ -147,7 +149,15 @@ export function TopBar({
                 : '已保存'}
           </span>
           <span className="meta-sep">·</span>
-          <span>{wordCount.toLocaleString('zh-CN')} 字</span>
+          <button
+            type="button"
+            className="meta-button"
+            onClick={onOpenStats}
+            title="查看文稿统计"
+            aria-label={`字数 ${wordCount.toLocaleString('zh-CN')}，查看文稿统计`}
+          >
+            {wordCount.toLocaleString('zh-CN')} 字
+          </button>
         </div>
       </div>
 

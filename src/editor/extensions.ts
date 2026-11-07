@@ -2,11 +2,22 @@ import CharacterCount from '@tiptap/extension-character-count'
 import Highlight from '@tiptap/extension-highlight'
 import Placeholder from '@tiptap/extension-placeholder'
 import StarterKit from '@tiptap/starter-kit'
+import { TableKit } from '@tiptap/extension-table'
+import TaskItem from '@tiptap/extension-task-item'
+import TaskList from '@tiptap/extension-task-list'
 import { CardBlock } from './CardBlock'
+import { CrossReference } from './crossRef'
+import { FootnoteReference } from './footnote'
 import { OutlineFlash } from './OutlineFlash'
 import { SlashCommand } from './SlashCommand'
 
-export function createExtensions(onInsertCard: () => void) {
+export interface ExtensionOptions {
+  onInsertCard: () => void
+  onInsertFootnote: () => void
+  onInsertCrossRef: () => void
+}
+
+export function createExtensions(options: ExtensionOptions) {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
@@ -22,8 +33,19 @@ export function createExtensions(onInsertCard: () => void) {
     }),
     CharacterCount.configure({ limit: 300000 }),
     Highlight,
+    TaskList,
+    TaskItem.configure({ nested: true }),
+    TableKit.configure({
+      table: { resizable: true, lastColumnResizable: false },
+    }),
+    FootnoteReference,
+    CrossReference,
     CardBlock,
     OutlineFlash,
-    SlashCommand.configure({ onInsertCard }),
+    SlashCommand.configure({
+      onInsertCard: options.onInsertCard,
+      onInsertFootnote: options.onInsertFootnote,
+      onInsertCrossRef: options.onInsertCrossRef,
+    }),
   ]
 }

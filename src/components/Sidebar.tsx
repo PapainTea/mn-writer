@@ -9,11 +9,13 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import { useCallback, useState } from 'react'
 import { cardColorIndex } from '../editor/cardColors'
 import { setDraggedCard, takeDraggedCard } from '../editor/dragCard'
 import { cardSummary } from '../lib/cardSummary'
 import { relativeTime } from '../lib/format'
 import type { MnCard, MnConnection, OutlineItem, WriterDocument } from '../types'
+import { ConfirmDialog } from './ConfirmDialog'
 import { OutlinePanel } from './OutlinePanel'
 
 type SidebarTab = 'docs' | 'cards' | 'outline'
@@ -117,6 +119,8 @@ export function Sidebar({
   selectedCardIds,
 }: SidebarProps) {
   const footer = connectionFooter(connection)
+  const [pendingDelete, setPendingDelete] = useState<WriterDocument | null>(null)
+  const closeConfirm = useCallback(() => setPendingDelete(null), [])
 
   return (
     <aside className="sidebar">
@@ -172,7 +176,8 @@ export function Sidebar({
                   type="button"
                   className="doc-row-delete"
                   title="删除文稿"
-                  onClick={() => onDeleteDocument(doc.id)}
+                  aria-label={`删除文稿：${doc.title || '未命名文稿'}`}
+                  onClick={() => setPendingDelete(doc)}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -281,6 +286,18 @@ export function Sidebar({
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={`删除「${pendingDelete?.title || '未命名文稿'}」？`}
+        description="正文与卡片引用会一并移除，此操作不可撤销。"
+        confirmLabel="删除文稿"
+        onConfirm={() => {
+          if (pendingDelete) onDeleteDocument(pendingDelete.id)
+          setPendingDelete(null)
+        }}
+        onCancel={closeConfirm}
+      />
     </aside>
   )
 }

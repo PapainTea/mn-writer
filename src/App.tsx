@@ -1,55 +1,46 @@
 import type { Editor, JSONContent } from '@tiptap/core'
 import { NodeSelection } from '@tiptap/pm/state'
-import { EditorContent, useEditor } from '@tiptap/react'
+import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import { Square } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { BubbleToolbar } from './components/BubbleToolbar'
 import { CardPicker } from './components/CardPicker'
+import { CrossRefPicker } from './components/CrossRefPicker'
+import { FootnoteDialog } from './components/FootnoteDialog'
 import { ResizeGrip } from './components/ResizeGrip'
 import { Sidebar } from './components/Sidebar'
+import { StatsPanel } from './components/StatsPanel'
 import { TopBar } from './components/TopBar'
 import { takeDraggedCard } from './editor/dragCard'
+import { loadDocumentContent } from './editor/documentLoad'
 import { createExtensions } from './editor/extensions'
 import { insertCardBlock } from './editor/insertCard'
+import { registerSlashActions, slashActions } from './editor/slashActions'
+import { useCrossRefTargets, useDocumentInsertions } from './hooks/useDocumentInsertions'
+import { useDocumentExport } from './hooks/useDocumentExport'
 import { useEditorDerivedState } from './hooks/useEditorDerivedState'
 import { useSelectedCardIds } from './hooks/useSelectedCardId'
 import { useWriterDocuments } from './hooks/useWriterDocuments'
 import { getCardViewMode, setCardViewMode, subscribeCardView } from './lib/cardView'
 import { EMPTY_DOC } from './lib/document'
-import { documentTitleFromFile, parseDocumentFile } from './lib/documentFile'
-import { docToMarkdown } from './lib/markdown'
 import { pinSelectedCards } from './lib/cardOrder'
 import { filterCards } from './lib/cardSearch'
 import { countInsertedCards } from './lib/inserted'
 import { jumpToOutline } from './lib/outline'
 import { usePanelSizeRestore } from './hooks/usePanelSizeRestore'
+import { collectDocumentStats } from './lib/documentStats'
 import { isCompactLayout, watchCompactLayout } from './lib/layout'
 import { loadTheme, persistTheme, type ThemeMode } from './lib/storage'
 import { subscribeToast } from './lib/toast'
 import { getAdapter } from './mn'
 import type { MnCard, OutlineItem } from './types'
 
-function downloadFile(filename: string, content: string, type: string) {
-  const blob = new Blob([content], { type })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
-
-function safeFilename(title: string): string {
-  return title.replace(/[\\/:*?"<>|]/g, '-').trim() || '未命名文稿'
-}
-
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme())
   const [sidebarOpen, setSidebarOpen] = useState(() => !isCompactLayout())
   const [sidebarTab, setSidebarTab] = useState<'docs' | 'cards' | 'outline'>('cards')
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [statsOpen, setStatsOpen] = useState(false)
   const [focusMode, setFocusMode] = useState(false)
   const [allCards, setAllCards] = useState<MnCard[]>([])
   const [loadingCards, setLoadingCards] = useState(true)
@@ -95,7 +86,20 @@ export default function App() {
   const scheduleDerivedStateRef = useRef<(current: Editor) => void>(() => undefined)
   const editorRef = useRef<Editor | null>(null)
 
-  const extensions = useMemo(() => createExtensions(() => setPickerOpen(true)), [])
+  const extensions = useMemo(
+    () =>
+      createExtensions({
+        onInsertCard: () => slashActions().insertCard(),
+        onInsertFootnote: () => slashActions().insertFootnote(),
+        onInsertCrossRef: () => slashActions().insertCrossRef(),
+      }),
+    [],
+  )
+
+  // 编辑器实例随文稿一起重建。
+  // ProseMirror 的撤销栈属于编辑器实例，若跨文稿共用同一个实例，
+  // 切换文稿后的撤销操作会回滚上一份文稿的编辑，并把那份内容写进当前文稿。
+  const editorDocumentId = activeId
 
   const editor = useEditor(
     {
@@ -130,7 +134,7 @@ export default function App() {
         scheduleDerivedStateRef.current(current)
       },
     },
-    [extensions],
+    [extensions, editorDocumentId],
   )
 
   useEffect(() => {
@@ -143,15 +147,48 @@ export default function App() {
     scheduleDerivedStateRef.current = scheduleDerivedState
   }, [scheduleDerivedState])
 
-  const loadedDocumentId = useRef(activeDocumentId)
+  /** 可被交叉引用的目标，随正文变化更新。 */
+  const crossRefDoc = useEditorState({
+    editor,
+    selector: ({ editor: current }) => (current ? current.getJSON() : null),
+  })
+  const crossRefTargets = useCrossRefTargets(crossRefDoc)
+
+  /** 文稿统计数据，供统计面板展示。 */
+  const stats = useMemo(() => {
+    if (!crossRefDoc) return collectDocumentStats({ type: 'doc', content: [] })
+    return collectDocumentStats(crossRefDoc)
+  }, [crossRefDoc])
+
+  const {
+    crossRefOpen,
+    setCrossRefOpen,
+    footnoteRequest,
+    insertFootnote,
+    requestFootnote,
+    insertCrossRef,
+  } = useDocumentInsertions(editor, setToast)
 
   useEffect(() => {
-    if (!editor || loadedDocumentId.current === activeId) return
-    loadedDocumentId.current = activeId
+    registerSlashActions({
+      insertCard: () => setPickerOpen(true),
+      insertFootnote: requestFootnote,
+      insertCrossRef: () => setCrossRefOpen(true),
+    })
+  }, [requestFootnote, setCrossRefOpen])
+
+  // 编辑器实例随文稿重建，装载内容由实例的初始内容完成。
+  // 这里按编辑器实例记录已装载的文稿，避免同一实例重复装载。
+  const loadedEditorRef = useRef<{ editor: Editor; documentId: string } | null>(null)
+  useEffect(() => {
+    if (!editor) return
+    if (loadedEditorRef.current?.editor === editor) return
+    loadedEditorRef.current = { editor, documentId: activeId }
     const document = getDocument(activeId)
     if (!document) return
     const timer = window.setTimeout(() => {
-      editor.commands.setContent(document.content, { emitUpdate: false })
+      // 装载文稿属于结构替换，不进入撤销栈，也不触发自动保存。
+      loadDocumentContent(editor, document.content)
       syncDerivedState(editor)
     }, 0)
     return () => window.clearTimeout(timer)
@@ -274,6 +311,12 @@ export default function App() {
     [editor, syncDerivedState],
   )
 
+  useEffect(() => {
+    // 斜杠菜单请求插入脚注时执行插入。
+    if (footnoteRequest === 0) return
+    insertFootnote()
+  }, [footnoteRequest, insertFootnote])
+
   /** 刷新正文内全部卡片内容，同时重新读取侧栏卡片列表。 */
   const refreshAllCards = useCallback(async () => {
     if (!editor || refreshing) return
@@ -385,54 +428,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [flushSave, focusMode, pickerOpen])
 
-  const copyMarkdown = useCallback(async () => {
-    if (!editor) return
-    const markdown = docToMarkdown(editor.getJSON())
-    try {
-      await navigator.clipboard.writeText(markdown)
-      setToast('Markdown 已复制')
-    } catch {
-      setToast('复制失败，请检查剪贴板权限')
-    }
-  }, [editor])
-
-  const copyMarkdownFile = useCallback(() => {
-    if (!editor) return
-    downloadFile(
-      `${safeFilename(activeDocument?.title ?? '')}.md`,
-      docToMarkdown(editor.getJSON()),
-      'text/markdown',
-    )
-    setToast('Markdown 已下载')
-  }, [activeDocument?.title, editor])
-
-  const downloadJson = useCallback(() => {
-    if (!editor) return
-    downloadFile(
-      `${safeFilename(activeDocument?.title ?? '')}.json`,
-      JSON.stringify(editor.getJSON(), null, 2),
-      'application/json',
-    )
-    setToast('JSON 备份已下载')
-  }, [activeDocument?.title, editor])
-
-  const importJson = useCallback(
-    async (file: File) => {
-      if (!editor) return
-      try {
-        const content = parseDocumentFile(await file.text())
-        editor.schema.nodeFromJSON(content)
-        const title = documentTitleFromFile(file.name)
-        const imported = importDocument(title, content)
-        setSidebarTab('docs')
-        if (isCompactLayout()) setSidebarOpen(false)
-        setToast(`已恢复「${imported.title}」`)
-      } catch (error) {
-        setToast(error instanceof Error ? error.message : '导入失败，请检查文件内容')
-      }
-    },
-    [editor, importDocument],
-  )
+  const { copyMarkdown, downloadMarkdown, downloadJson, importJson } = useDocumentExport({
+    editor,
+    title: activeDocument?.title ?? '',
+    onToast: setToast,
+    importDocument,
+  })
 
   return (
     <div className={`app${sidebarOpen ? '' : ' sidebar-closed'}${focusMode ? ' is-focus' : ''}`}>
@@ -489,9 +490,10 @@ export default function App() {
             onToggleCardView={toggleCardView}
             onThemeChange={setTheme}
             onCopyMarkdown={copyMarkdown}
-            onDownloadMarkdown={copyMarkdownFile}
+            onDownloadMarkdown={downloadMarkdown}
             onDownloadJson={downloadJson}
             onImportJson={importJson}
+            onOpenStats={() => setStatsOpen(true)}
             refreshing={refreshing}
             onRefreshCards={() => void refreshAllCards()}
           />
@@ -528,6 +530,17 @@ export default function App() {
         onInsert={insertCard}
         selectedCardIds={selectedCardIds}
       />
+
+      <CrossRefPicker
+        open={crossRefOpen}
+        targets={crossRefTargets}
+        onClose={() => setCrossRefOpen(false)}
+        onInsert={insertCrossRef}
+      />
+
+      <StatsPanel open={statsOpen} stats={stats} onClose={() => setStatsOpen(false)} />
+
+      <FootnoteDialog />
 
       {toast && <div className="toast">{toast}</div>}
 

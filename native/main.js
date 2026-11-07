@@ -1,7 +1,9 @@
 JSB.require("SelectionBridge");
 JSB.require("CitekeyBridge");
 JSB.require("StorageBridge");
+JSB.require("MediaBridge");
 JSB.require("LayoutBridge");
+JSB.require("DragGuard");
 JSB.require("PanelBridge");
 
 function handlePanelMessage(addon, name, payload) {
@@ -17,6 +19,15 @@ function handlePanelMessage(addon, name, payload) {
   }
   if (name === "storage:save") {
     return __MN_WRITER_STORAGE__.save(payload);
+  }
+  if (name === "documents:load") {
+    return __MN_WRITER_STORAGE__.loadDocuments();
+  }
+  if (name === "documents:save") {
+    return __MN_WRITER_STORAGE__.saveDocuments(payload);
+  }
+  if (name === "media:read") {
+    return __MN_WRITER_MEDIA__.read(payload);
   }
   if (name === "citekey:list") {
     return { values: __MN_WRITER_CITEKEY__.load() };
@@ -44,7 +55,7 @@ function handlePanelMessage(addon, name, payload) {
 }
 
 JSB.newAddon = function (mainPath) {
-  return JSB.defineClass("MNWriterAddon : JSExtension", {
+  return JSB.defineClass("MNWriterAddon : JSExtension <UIGestureRecognizerDelegate>", {
     sceneWillConnect: function () {
       var addon = self;
       addon.addonid = "top.museday.mn.writer";
@@ -82,6 +93,16 @@ JSB.newAddon = function (mainPath) {
 
     onWriterSelectionChanged: function () {
       if (self.panelBridge) self.panelBridge.handleSelectionChanged();
+    },
+
+    /** 顶栏拖动手势回调，位移由 DragGuard 直接改写面板视图位置。 */
+    handleWriterDrag: function (gesture) {
+      return __MN_WRITER_DRAG_GUARD__.pan(gesture);
+    },
+
+    /** 只允许从顶栏开始的手势参与识别，正文区域交给网页处理。 */
+    gestureRecognizerShouldBegin: function (gesture) {
+      return __MN_WRITER_DRAG_GUARD__.shouldBegin(gesture);
     },
 
     controllerWillLayoutSubviews: function (controller) {

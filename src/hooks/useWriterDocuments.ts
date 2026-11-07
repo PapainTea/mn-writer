@@ -1,6 +1,7 @@
 import type { JSONContent } from '@tiptap/core'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { EMPTY_DOC } from '../lib/document'
+import { sameContent } from '../lib/contentEqual'
 import {
   createId,
   loadActiveId,
@@ -28,10 +29,24 @@ export function useWriterDocuments(onStorageFailure: () => void) {
   const saveTimer = useRef<number | null>(null)
   const pendingContent = useRef<JSONContent | null>(null)
   const storageWarned = useRef(false)
+  /** 已写入存储的文稿集合，用于判断内存状态与存储是否一致。 */
+  const persistedRef = useRef<string>(JSON.stringify(documents))
 
   useEffect(() => {
     documentsRef.current = documents
   }, [documents])
+
+  /** 把当前文稿集合写入存储，并记录写入后的快照。 */
+  const persistCurrent = useCallback((): boolean => {
+    const ok = persistDocuments(documentsRef.current)
+    if (ok) persistedRef.current = JSON.stringify(documentsRef.current)
+    return ok
+  }, [])
+
+  /** 判断内存里的文稿集合与存储是否存在差异。 */
+  const persistNeeded = useCallback((): boolean => {
+    return persistedRef.current !== JSON.stringify(documentsRef.current)
+  }, [])
 
   const activeDocument = documents.find((doc) => doc.id === activeId) ?? documents[0]
   const activeDocumentId = activeDocument?.id ?? ''
@@ -51,12 +66,19 @@ export function useWriterDocuments(onStorageFailure: () => void) {
   const commitContent = useCallback(
     (content: JSONContent): boolean => {
       if (!activeDocumentId) return false
+      const current = documentsRef.current.find((doc) => doc.id === activeDocumentId)
+      // 内容没有变化时不写盘，也不改动修改时间。
+      if (current && sameContent(current.content, content)) {
+        storageWarned.current = false
+        setSaveState('saved')
+        return true
+      }
       const next = documentsRef.current.map((doc) =>
         doc.id === activeDocumentId ? { ...doc, content, updatedAt: Date.now() } : doc,
       )
       documentsRef.current = next
       setDocuments(next)
-      if (persistDocuments(next)) {
+      if (persistCurrent()) {
         storageWarned.current = false
         setSaveState('saved')
         return true
@@ -65,7 +87,7 @@ export function useWriterDocuments(onStorageFailure: () => void) {
         return false
       }
     },
-    [activeDocumentId, notifyStorageFailure],
+    [activeDocumentId, notifyStorageFailure, persistCurrent],
   )
 
   const flushSave = useCallback(() => {
@@ -78,14 +100,20 @@ export function useWriterDocuments(onStorageFailure: () => void) {
       pendingContent.current = null
       return commitContent(content)
     }
-    if (persistDocuments(documentsRef.current)) {
+    // 没有待写内容时只确认存储可用，不重复写盘。
+    if (!persistNeeded()) {
+      storageWarned.current = false
+      setSaveState('saved')
+      return true
+    }
+    if (persistCurrent()) {
       storageWarned.current = false
       setSaveState('saved')
       return true
     }
     notifyStorageFailure()
     return false
-  }, [activeDocumentId, commitContent, notifyStorageFailure])
+  }, [activeDocumentId, commitContent, notifyStorageFailure, persistCurrent, persistNeeded])
 
   const scheduleSave = useCallback(
     (content: JSONContent, quiet = false) => {
@@ -105,7 +133,7 @@ export function useWriterDocuments(onStorageFailure: () => void) {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (persistDocuments(documents)) {
+      if (persistCurrent()) {
         storageWarned.current = false
         setSaveState((current) => (current === 'error' ? 'saved' : current))
         return
@@ -113,7 +141,7 @@ export function useWriterDocuments(onStorageFailure: () => void) {
       notifyStorageFailure()
     }, 250)
     return () => window.clearTimeout(timer)
-  }, [documents, notifyStorageFailure])
+  }, [documents, notifyStorageFailure, persistCurrent])
 
   useEffect(() => {
     const persistNow = () => {
@@ -126,7 +154,7 @@ export function useWriterDocuments(onStorageFailure: () => void) {
         documentsRef.current = snapshot
         pendingContent.current = null
       }
-      persistDocuments(snapshot)
+      if (persistNeeded()) persistCurrent()
     }
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') persistNow()
@@ -139,7 +167,7 @@ export function useWriterDocuments(onStorageFailure: () => void) {
       window.removeEventListener('pagehide', persistNow)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [activeDocumentId])
+  }, [activeDocumentId, persistCurrent, persistNeeded])
 
   const selectDocument = useCallback(
     (id: string) => {
@@ -181,9 +209,7 @@ export function useWriterDocuments(onStorageFailure: () => void) {
 
   const deleteDocument = useCallback(
     (id: string) => {
-      const target = documents.find((doc) => doc.id === id)
-      if (!target) return
-      if (!window.confirm(`删除「${target.title || '未命名文稿'}」？此操作不可撤销。`)) return
+      if (!documentsRef.current.some((doc) => doc.id === id)) return
       flushSave()
       const remaining = documentsRef.current.filter((doc) => doc.id !== id)
       if (remaining.length > 0) {
@@ -209,7 +235,7 @@ export function useWriterDocuments(onStorageFailure: () => void) {
       setActiveId(fresh.id)
       persistActiveId(fresh.id)
     },
-    [activeId, documents, flushSave],
+    [activeId, flushSave],
   )
 
   const renameDocument = useCallback(

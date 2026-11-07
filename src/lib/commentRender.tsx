@@ -38,8 +38,10 @@ const SANITIZE_OPTIONS = {
     'hr',
     'sup',
     'sub',
+    'img',
   ],
-  ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'class'],
+  ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'class', 'src', 'alt', 'width', 'height'],
+  ALLOWED_URI_REGEXP: /^(?:blob:|data:image\/|https?:\/\/)/i,
 }
 
 function sanitize(html: string): string {
@@ -61,8 +63,8 @@ export function renderCommentHtml(comment: MnComment): string {
   return sanitize(`<p>${comment.text}</p>`)
 }
 
-export function CommentBody({ comment }: { comment: MnComment }) {
-  const html = renderCommentHtml(comment)
-  if (!html) return null
-  return <span className="mn-comment-body">{parse(html)}</span>
+export function CommentBody({ comment, html }: { comment: MnComment; html?: string }) {
+  const content = html ?? renderCommentHtml(comment)
+  if (!content) return null
+  return <span className="mn-comment-body">{parse(content)}</span>
 }

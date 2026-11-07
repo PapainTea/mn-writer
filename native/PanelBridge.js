@@ -8,6 +8,7 @@ var __MN_WRITER_PANEL__ = (function () {
     var selectionTimer = null;
     var layoutTimer = null;
     var lastSelectionKey = "";
+    var dragLocked = false;
 
     var layout = __MN_WRITER_LAYOUT__;
     layout.configure({
@@ -62,7 +63,13 @@ var __MN_WRITER_PANEL__ = (function () {
       created.maxContentHeight = 1200;
       created.onMessage = function (name, payload) {
         if (name === "__closed__") {
+          try {
+            __MN_WRITER_DRAG_GUARD__.detach();
+          } catch (error) {
+            console.log("[MN Writer] 移除顶栏拖动手势失败：" + error);
+          }
           panel = null;
+          dragLocked = false;
           stopLayoutTimer();
           refreshCommands();
           return {};
@@ -95,8 +102,34 @@ var __MN_WRITER_PANEL__ = (function () {
       pushSelection();
       refreshCommands();
       layout.enforce();
+      dragLocked = lockNativeDrag();
       startLayoutTimer();
       return true;
+    }
+
+    /**
+     * 宿主的拖动手势挂在整个面板上，不只顶部 36 像素。
+     * 页面需要只在顶栏移动窗口，因此关闭宿主的拖动手势。
+     * 返回 false 时页面不应自行处理拖动，避免窗口位移叠加。
+     */
+    function lockNativeDrag() {
+      if (!panel) return false;
+      try {
+        if (!__MN_WRITER_DRAG_GUARD__.disable(panel)) {
+          console.log("[MN Writer] 未找到宿主拖动手势");
+          return false;
+        }
+        if (!__MN_WRITER_DRAG_GUARD__.attach(config.getAddon(), panel)) {
+          console.log("[MN Writer] 顶栏拖动手势安装失败，恢复宿主拖动");
+          __MN_WRITER_DRAG_GUARD__.enable(panel);
+          return false;
+        }
+        console.log("[MN Writer] 顶栏拖动手势已接管");
+        return true;
+      } catch (error) {
+        console.log("[MN Writer] 关闭宿主拖动手势失败：" + error);
+      }
+      return false;
     }
 
     function startLayoutTimer() {
@@ -105,7 +138,8 @@ var __MN_WRITER_PANEL__ = (function () {
         LAYOUT_INTERVAL_SECONDS,
         true,
         function () {
-          layout.enforce();
+          if (!__MN_WRITER_DRAG_GUARD__.dragging()) layout.enforce();
+          if (!dragLocked) dragLocked = lockNativeDrag();
         },
       );
     }
@@ -122,6 +156,11 @@ var __MN_WRITER_PANEL__ = (function () {
 
     function close() {
       if (!panel) return;
+      try {
+        __MN_WRITER_DRAG_GUARD__.detach();
+      } catch (error) {
+        console.log("[MN Writer] 移除顶栏拖动手势失败：" + error);
+      }
       stopLayoutTimer();
       try {
         panel.hideFloating();
@@ -129,6 +168,7 @@ var __MN_WRITER_PANEL__ = (function () {
         console.log("[MN Writer] 收起面板失败：" + error);
       }
       panel = null;
+      dragLocked = false;
       refreshCommands();
     }
 
@@ -147,6 +187,12 @@ var __MN_WRITER_PANEL__ = (function () {
       } catch (error) {
         console.log("[MN Writer] 推送事件失败：" + error);
       }
+    }
+
+    function safeSize() {
+      var metrics = layout.metrics() || {};
+      if (!dragLocked) dragLocked = lockNativeDrag();
+      return metrics;
     }
 
     function pushSelection() {
@@ -193,12 +239,18 @@ var __MN_WRITER_PANEL__ = (function () {
     }
 
     return {
+      current: function () {
+        return panel;
+      },
       open: open,
       close: close,
       toggle: toggle,
       isOpen: isOpen,
-      layout: layout.enforce,
-      safeSize: layout.metrics,
+      layout: function () {
+        if (__MN_WRITER_DRAG_GUARD__.dragging()) return null;
+        return layout.enforce();
+      },
+      safeSize: safeSize,
       refreshCommands: refreshCommands,
       post: post,
       pushSelection: pushSelection,

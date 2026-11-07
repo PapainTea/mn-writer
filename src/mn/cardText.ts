@@ -1,5 +1,11 @@
 import type { CommentFormat, MnComment } from '../types'
-import { collapseWhitespace, htmlToText, looksLikeHtml, stripLeadingCss } from '../lib/htmlText'
+import {
+  collapseWhitespace,
+  htmlToText,
+  looksLikeHtml,
+  stripLeadingCss,
+  stripMediaRefs,
+} from '../lib/htmlText'
 
 interface TextItem {
   index?: number
@@ -47,7 +53,10 @@ export function readRichHtml(card: CardTextSource): string | undefined {
   return body.find(
     (text) =>
       looksLikeHtml(text) &&
-      (/mnzotero-card/i.test(text) || /data-mnzotero-meta/i.test(text) || /<div\b/i.test(text)),
+      (/mnzotero-card/i.test(text) ||
+        /data-mnzotero-meta/i.test(text) ||
+        /<div\b/i.test(text) ||
+        /<img\b/i.test(text)),
   )
 }
 
@@ -59,15 +68,17 @@ export function readExcerpt(card: CardTextSource): string {
   }
   const excerpts = (card.texts ?? []).filter((item) => item.excerpt && item.text?.trim())
   if (excerpts.length > 0) {
-    return excerpts
+    return stripMediaRefs(
+      excerpts
       .map((item) => stripLeadingCss(item.text ?? ''))
       .filter(Boolean)
-      .join('\n\n')
+        .join('\n\n'),
+    )
   }
   const first = (card.texts ?? [])
     .map((item) => stripLeadingCss(item.text ?? ''))
     .find(Boolean)
-  return first ?? card.preview ?? ''
+  return stripMediaRefs(first ?? card.preview ?? '')
 }
 
 export function readComments(card: CardTextSource, excerpt: string): MnComment[] {
@@ -83,12 +94,8 @@ export function readComments(card: CardTextSource, excerpt: string): MnComment[]
       if (!plain) return false
       // HTML 卡片正文会被宿主同时放进批注，重复展示会形成大段重复文字。
       if (/mnzotero-card|data-mnzotero-meta/i.test(comment.text)) return false
-      if (
-        excerptKey &&
-        (plain === excerptKey || excerptKey.startsWith(plain) || plain.startsWith(excerptKey))
-      ) {
-        return false
-      }
+      // 正文与批注完全相同时只保留正文，其余重复内容交给内容块去重处理。
+      if (excerptKey && plain === excerptKey) return false
       return true
     })
 }

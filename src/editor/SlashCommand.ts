@@ -6,6 +6,8 @@ import Suggestion, {
 
 export interface SlashCommandOptions {
   onInsertCard: () => void
+  onInsertFootnote: () => void
+  onInsertCrossRef: () => void
 }
 
 interface SlashItem {
@@ -64,6 +66,45 @@ function buildItems(options: SlashCommandOptions): SlashItem[] {
       keywords: 'quote blockquote 引用',
       run: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).toggleBlockquote().run()
+      },
+    },
+    {
+      title: '任务列表',
+      hint: '待办事项清单',
+      keywords: 'task todo checklist 任务 待办 清单',
+      run: ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).toggleTaskList().run()
+      },
+    },
+    {
+      title: '表格',
+      hint: '三行三列数据表',
+      keywords: 'table 表格 数据',
+      run: ({ editor, range }) => {
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+          .run()
+      },
+    },
+    {
+      title: '脚注',
+      hint: '为当前段落补充说明',
+      keywords: 'footnote note 脚注 注释 尾注',
+      run: ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).run()
+        options.onInsertFootnote()
+      },
+    },
+    {
+      title: '交叉引用',
+      hint: '引用标题或表格',
+      keywords: 'crossref cross reference 交叉引用 引用 参见',
+      run: ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).run()
+        options.onInsertCrossRef()
       },
     },
     {
@@ -177,7 +218,11 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
   name: 'slashCommand',
 
   addOptions() {
-    return { onInsertCard: () => undefined }
+    return {
+      onInsertCard: () => undefined,
+      onInsertFootnote: () => undefined,
+      onInsertCrossRef: () => undefined,
+    }
   },
 
   addProseMirrorPlugins() {

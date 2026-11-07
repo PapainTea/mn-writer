@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { Fragment, type Node as ProseMirrorNode } from '@tiptap/pm/model'
-import { commentToPlainText } from '../lib/commentText'
+import { blockPlainText, cardContentBlocks, cardHasText } from '../lib/cardContent'
 import type { MnCard } from '../types'
 
 /** 把多行文本拆成若干段，空行不产生空段落。 */
@@ -41,16 +41,16 @@ function plainParagraph(editor: Editor, text: string): ProseMirrorNode | null {
 export function cardToParagraphs(editor: Editor, card: MnCard): ProseMirrorNode[] {
   const paragraphs: ProseMirrorNode[] = []
 
-  const title = titleParagraph(editor, card.title)
-  if (title) paragraphs.push(title)
-
-  for (const line of splitLines(card.excerpt)) {
-    const paragraph = plainParagraph(editor, line)
-    if (paragraph) paragraphs.push(paragraph)
+  // 标题与正文内容相同时只保留正文，转换后不会出现两份同样的内容。
+  const title = card.title.trim()
+  if (title && !cardHasText(card, title)) {
+    const node = titleParagraph(editor, title)
+    if (node) paragraphs.push(node)
   }
 
-  for (const comment of card.comments) {
-    for (const line of splitLines(commentToPlainText(comment))) {
+  for (const block of cardContentBlocks(card)) {
+    if (block.kind === 'media') continue
+    for (const line of splitLines(blockPlainText(block))) {
       const paragraph = plainParagraph(editor, line)
       if (paragraph) paragraphs.push(paragraph)
     }

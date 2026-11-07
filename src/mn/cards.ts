@@ -1,6 +1,7 @@
 import type { CardKind, MnCard } from '../types'
 import { callBridge, readCapabilities, type Capabilities } from './client'
 import { cardTexts, readComments, readExcerpt, readRichHtml } from './cardText'
+import { collectMedia, type MediaPart } from './cardMedia'
 import { callNative, nativeBridgeAvailable } from './native'
 import { loadCitekeyIndex } from './zoteroIndex'
 import { readZoteroMeta } from './zoteroMeta'
@@ -43,12 +44,13 @@ export interface NoteItem {
   title?: string
   preview?: string
   texts?: TextItem[]
-  parts?: Array<{ index?: number; text?: string; kind?: string; excerpt?: boolean }>
+  parts?: MediaPart[]
   comments?: Array<{ text?: string; type?: string }>
   hashtags?: string[]
   metadata?: { colorIndex?: number }
   sourceAnchor?: { page?: number | null; bookmd5?: string; hasExcerpt?: boolean }
   addonValues?: Record<string, unknown>
+  hasInk?: boolean
 }
 
 export interface BatchResult {
@@ -179,11 +181,13 @@ function toCard(
   const page = card.sourceAnchor?.page ?? node?.docPage
   const excerpt = readExcerpt(card)
   const richHtml = readRichHtml(card)
+  const media = collectMedia(card.parts, [...cardTexts(card), excerpt, richHtml ?? ''])
   return {
     id: card.noteid ?? node?.noteid ?? '',
     title: card.title?.trim() || node?.title?.trim() || card.preview?.trim() || '未命名卡片',
     excerpt,
     excerptHtml: richHtml,
+    media: media.items,
     comments: readComments(card, excerpt),
     tags: card.hashtags ?? [],
     page: typeof page === 'number' ? page : undefined,

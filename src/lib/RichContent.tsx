@@ -36,9 +36,13 @@ const ALLOWED_TAGS = [
   'hr',
   'sup',
   'sub',
+  'img',
 ]
 
-const ALLOWED_ATTR = ['href', 'title', 'target', 'rel', 'class']
+const ALLOWED_ATTR = ['href', 'title', 'target', 'rel', 'class', 'src', 'alt', 'width', 'height']
+
+/** 卡片里的图片用取回的地址，blob 与 data 都要放行。 */
+const ALLOWED_URI_REGEXP = /^(?:blob:|data:image\/|https?:\/\/)/i
 
 /**
  * 渲染卡片自带的 HTML。
@@ -57,6 +61,7 @@ export function sanitizeCardHtml(html: string): string {
   return DOMPurify.sanitize(normalized, {
     ALLOWED_TAGS,
     ALLOWED_ATTR,
+    ALLOWED_URI_REGEXP,
   })
 }
 

@@ -38,7 +38,7 @@ export function stripLeadingCss(text: string): string {
 
 /** 判断一段文本是否含有可渲染的 HTML 标签。 */
 export function looksLikeHtml(text: string): boolean {
-  return /<\/?(?:div|span|p|br|style|table|ul|ol|li|h[1-6]|strong|em|b|i|a)\b/i.test(text)
+  return /<\/?(?:div|span|p|br|style|table|ul|ol|li|h[1-6]|strong|em|b|i|a|img)\b/i.test(text)
 }
 
 /** 把 HTML 转换为可读纯文本，样式块与脚本块整体丢弃。 */
@@ -67,4 +67,52 @@ export function htmlToText(html: string): string {
 /** 纯文本统一压缩为单行，供列表摘要使用。 */
 export function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
+}
+
+/** 比较两段文字是否表达同一内容，忽略空白与常见标点。 */
+export function compareTextKey(text: string): string {
+  return stripMediaRefs(htmlToText(text))
+    .replace(/[\s\u3000,.;:!?'"“”‘’()（）[\]【】<>《》\-—_]/g, '')
+    .toLowerCase()
+}
+
+/**
+ * 宿主在卡片正文里记录图片用的地址，形如 `marginnote4app://markdownimg/png/<哈希>`。
+ */
+const MEDIA_REF_SOURCE = 'marginnote4app://markdownimg/([a-z0-9.+-]+)/([^\\s)"\'<>]+)'
+
+export interface MediaRef {
+  hash: string
+  mimeType: string
+}
+
+const MIME_BY_FORMAT: Record<string, string> = {
+  png: 'image/png',
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+}
+
+/** 取出文本里的图片引用。 */
+export function readMediaRefs(text: string): MediaRef[] {
+  const refs: MediaRef[] = []
+  const seen = new Set<string>()
+  const pattern = new RegExp(MEDIA_REF_SOURCE, 'gi')
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(String(text ?? ''))) !== null) {
+    const hash = match[2] ?? ''
+    if (!hash || seen.has(hash)) continue
+    seen.add(hash)
+    refs.push({ hash, mimeType: MIME_BY_FORMAT[(match[1] ?? '').toLowerCase()] ?? 'image/png' })
+  }
+  return refs
+}
+
+/** 从文本里移除图片引用，剩下的部分才是可读文字。 */
+export function stripMediaRefs(text: string): string {
+  return String(text ?? '')
+    .replace(new RegExp(MEDIA_REF_SOURCE, 'gi'), '')
+    .replace(/!\[[^\]]*\]\(\s*\)/g, '')
+    .trim()
 }
