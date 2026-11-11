@@ -1,6 +1,7 @@
 import { CornerDownLeft, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { groupCrossRefTargets, type CrossRefTarget } from '../lib/crossRef'
+import { EmptyState } from './EmptyState'
 
 interface CrossRefPickerProps {
   open: boolean
@@ -112,9 +113,9 @@ export function CrossRefPicker({ open, targets, onClose, onInsert }: CrossRefPic
 
         <div className="picker-list crossref-list" role="listbox">
           {flat.length === 0 && (
-            <div className="picker-empty">
+            <EmptyState className="picker-empty" kind="empty">
               {targets.length === 0 ? '正文还没有标题或表格。' : '没有找到匹配的目标。'}
-            </div>
+            </EmptyState>
           )}
           {groups.map((group) => (
             <div key={group.kind} className="crossref-group">

@@ -1,7 +1,7 @@
 {
   "name": "mn-writer",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.18.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

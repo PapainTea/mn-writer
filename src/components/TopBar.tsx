@@ -25,6 +25,8 @@ import type { ThemeMode } from '../lib/storage'
 interface TopBarProps {
   title: string
   onTitleChange: (title: string) => void
+  /** 是否有当前文稿。没有文稿时标题不可编辑。 */
+  hasDocument: boolean
   saveState: 'saved' | 'saving' | 'idle' | 'error'
   editor: Editor | null
   theme: ThemeMode
@@ -69,6 +71,7 @@ const FOCUS_SHORTCUT = navigator.userAgent.includes('Mac') ? '⌘⇧F' : 'Ctrl+S
 export function TopBar({
   title,
   onTitleChange,
+  hasDocument,
   saveState,
   editor,
   theme,
@@ -135,6 +138,7 @@ export function TopBar({
             className="doc-title"
             value={title}
             onChange={(event) => onTitleChange(event.target.value)}
+            disabled={!hasDocument}
             aria-label="文稿标题"
             spellCheck={false}
           />

@@ -1,8 +1,7 @@
-import { Extension, type Editor, type Range } from '@tiptap/core'
-import Suggestion, {
-  type SuggestionKeyDownProps,
-  type SuggestionProps,
-} from '@tiptap/suggestion'
+import { flip, shift, size } from '@floating-ui/dom'
+import { Extension } from '@tiptap/core'
+import Suggestion from '@tiptap/suggestion'
+import { createMenu, type SlashItem } from './slashMenu'
 
 export interface SlashCommandOptions {
   onInsertCard: () => void
@@ -10,12 +9,16 @@ export interface SlashCommandOptions {
   onInsertCrossRef: () => void
 }
 
-interface SlashItem {
-  title: string
-  hint: string
-  keywords: string
-  run: (context: { editor: Editor; range: Range }) => void
-}
+/** 菜单的最大高度。 */
+const MENU_MAX_HEIGHT = 320
+/** 菜单的最小宽度。 */
+const MENU_MIN_WIDTH = 208
+/** 菜单的最大宽度。 */
+const MENU_MAX_WIDTH = 264
+/** 菜单四周与面板边缘保留的距离。 */
+const MENU_EDGE = 12
+/** 菜单与光标行保留的距离。 */
+const MENU_GAP = 10
 
 function buildItems(options: SlashCommandOptions): SlashItem[] {
   return [
@@ -126,94 +129,6 @@ function filterItems(items: SlashItem[], query: string): SlashItem[] {
   )
 }
 
-function createMenu() {
-  let element: HTMLDivElement | null = null
-  let unmount: (() => void) | null = null
-  let items: SlashItem[] = []
-  let selected = 0
-  let command: ((item: SlashItem) => void) | null = null
-
-  const paint = () => {
-    if (!element) return
-    element.replaceChildren()
-    items.forEach((item, index) => {
-      const row = document.createElement('button')
-      row.type = 'button'
-      row.className = `slash-item${index === selected ? ' is-active' : ''}`
-      row.setAttribute('role', 'option')
-      row.setAttribute('aria-selected', String(index === selected))
-
-      const title = document.createElement('span')
-      title.className = 'slash-item-title'
-      title.textContent = item.title
-
-      const hint = document.createElement('span')
-      hint.className = 'slash-item-hint'
-      hint.textContent = item.hint
-
-      row.append(title, hint)
-      row.addEventListener('mousedown', (event) => {
-        event.preventDefault()
-        command?.(item)
-      })
-      element?.appendChild(row)
-    })
-    if (items.length === 0) {
-      const empty = document.createElement('div')
-      empty.className = 'slash-empty'
-      empty.textContent = '没有匹配的命令'
-      element.appendChild(empty)
-    }
-    element.querySelector('.slash-item.is-active')?.scrollIntoView({ block: 'nearest' })
-  }
-
-  return {
-    onStart(props: SuggestionProps<SlashItem>) {
-      element = document.createElement('div')
-      element.className = 'slash-menu'
-      element.setAttribute('role', 'listbox')
-      unmount = props.mount(element)
-      items = props.items
-      selected = 0
-      command = props.command
-      paint()
-    },
-    onUpdate(props: SuggestionProps<SlashItem>) {
-      items = props.items
-      selected = 0
-      command = props.command
-      paint()
-    },
-    onKeyDown(props: SuggestionKeyDownProps) {
-      if (props.event.key === 'ArrowDown') {
-        selected = Math.min(selected + 1, Math.max(items.length - 1, 0))
-        paint()
-        return true
-      }
-      if (props.event.key === 'ArrowUp') {
-        selected = Math.max(selected - 1, 0)
-        paint()
-        return true
-      }
-      if (props.event.key === 'Enter' || props.event.key === 'Tab') {
-        const item = items[selected]
-        if (item) {
-          command?.(item)
-          return true
-        }
-        return false
-      }
-      return false
-    },
-    onExit() {
-      unmount?.()
-      unmount = null
-      element = null
-      items = []
-    },
-  }
-}
-
 export const SlashCommand = Extension.create<SlashCommandOptions>({
   name: 'slashCommand',
 
@@ -236,6 +151,30 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
         command: ({ editor, range, props }) => props.run({ editor, range }),
         items: ({ query }) => filterItems(buildItems(options), query),
         render: createMenu,
+        placement: 'bottom-start',
+        offset: { mainAxis: MENU_GAP, crossAxis: 0 },
+        // 翻转由下面的中间件统一处理，四周保留同样的安全距离。
+        flip: false,
+        floatingUi: {
+          // 固定定位不受文档滚动影响，菜单不会因为正文滚动而偏移。
+          strategy: 'fixed',
+          middleware: [
+            flip({ padding: MENU_EDGE }),
+            // 下方空间不足时翻转到上方，仍放不下时在可视区域内平移。
+            shift({ padding: MENU_EDGE, crossAxis: true }),
+            // 菜单高度不超过可用空间。
+            size({
+              padding: MENU_EDGE,
+              apply({ availableHeight, availableWidth, elements }) {
+                const height = Math.min(MENU_MAX_HEIGHT, Math.max(0, availableHeight))
+                const width = Math.min(MENU_MAX_WIDTH, Math.max(0, availableWidth))
+                elements.floating.style.maxHeight = height + 'px'
+                elements.floating.style.maxWidth = width + 'px'
+                elements.floating.style.minWidth = Math.min(MENU_MIN_WIDTH, width) + 'px'
+              },
+            }),
+          ],
+        },
       }),
     ]
   },

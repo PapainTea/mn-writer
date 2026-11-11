@@ -6,19 +6,39 @@ import {
   ListTree,
   RefreshCw,
   Search,
+  Target,
   Trash2,
   X,
 } from 'lucide-react'
 import { useCallback, useState } from 'react'
-import { cardColorIndex } from '../editor/cardColors'
 import { setDraggedCard, takeDraggedCard } from '../editor/dragCard'
+import type { LibrarySearchState } from '../hooks/useLibrarySearch'
+import type { LibrarySuggestState } from '../hooks/useLibrarySuggest'
+import type { AssociationHit } from '../lib/associations'
 import { cardSummary } from '../lib/cardSummary'
+import type { CardFeedbackValue } from '../lib/cardFeedback'
+import type { CitationEntry, CitationIndex } from '../lib/citationIndex'
+import type { WritingContext } from '../lib/context'
+import type { GlossaryTerm } from '../lib/glossary'
+import type { KnowledgeStore } from '../lib/knowledge'
 import { relativeTime } from '../lib/format'
-import type { MnCard, MnConnection, OutlineItem, WriterDocument } from '../types'
+import type { RelevanceHit } from '../lib/relevance'
+import { CardHeading } from './CardHeading'
+import { EmptyState } from './EmptyState'
+import type {
+  LibraryDocumentHit,
+  LibraryNoteHit,
+  MnCard,
+  MnConnection,
+  OutlineItem,
+  WriterDocument,
+} from '../types'
 import { ConfirmDialog } from './ConfirmDialog'
+import { useScrollFade } from '../hooks/useScrollFade'
 import { OutlinePanel } from './OutlinePanel'
+import { RelatedPanel } from './RelatedPanel'
 
-type SidebarTab = 'docs' | 'cards' | 'outline'
+type SidebarTab = 'docs' | 'cards' | 'related' | 'outline'
 
 interface SidebarProps {
   tab: SidebarTab
@@ -30,6 +50,11 @@ interface SidebarProps {
   cardQuery: string
   loadingCards: boolean
   outline: OutlineItem[]
+  coverage: Map<string, number>
+  /** 键为节标识，值为该节缺少证据的断言数量。 */
+  claimCounts: Map<string, number>
+  /** 缺少证据的断言总数。 */
+  claimTotal: number
   connection: MnConnection
   onRetryConnection: () => void
   onSelectDocument: (id: string) => void
@@ -40,6 +65,22 @@ interface SidebarProps {
   onSelectOutline: (item: OutlineItem) => void
   onClose: () => void
   selectedCardIds: string[]
+  context: WritingContext | null
+  relatedHits: RelevanceHit[]
+  associations: AssociationHit[]
+  citationIndex: CitationIndex
+  cardUsage: Map<string, number>
+  knowledge: KnowledgeStore
+  cardFeedback: Map<string, CardFeedbackValue>
+  glossary: GlossaryTerm[]
+  library: LibrarySearchState
+  suggest: LibrarySuggestState
+  onFocusCard: (card: MnCard) => void
+  onSearchLibrary: (query: string) => void
+  onFocusNote: (note: LibraryNoteHit) => void
+  onInsertNote: (note: LibraryNoteHit) => void
+  onOpenDocument: (document: LibraryDocumentHit) => void
+  onSelectCitation: (entry: CitationEntry) => void
 }
 
 interface ConnectionFooter {
@@ -107,6 +148,9 @@ export function Sidebar({
   cardQuery,
   loadingCards,
   outline,
+  coverage,
+  claimCounts,
+  claimTotal,
   connection,
   onRetryConnection,
   onSelectDocument,
@@ -117,10 +161,28 @@ export function Sidebar({
   onSelectOutline,
   onClose,
   selectedCardIds,
+  context,
+  relatedHits,
+  associations,
+  citationIndex,
+  cardUsage,
+  knowledge,
+  cardFeedback,
+  glossary,
+  library,
+  suggest,
+  onFocusCard,
+  onSearchLibrary,
+  onFocusNote,
+  onInsertNote,
+  onOpenDocument,
+  onSelectCitation,
 }: SidebarProps) {
   const footer = connectionFooter(connection)
   const [pendingDelete, setPendingDelete] = useState<WriterDocument | null>(null)
   const closeConfirm = useCallback(() => setPendingDelete(null), [])
+  const { scrollerRef: cardScrollerRef, fadeTop: cardFadeTop, fadeBottom: cardFadeBottom } =
+    useScrollFade<HTMLDivElement>()
 
   return (
     <aside className="sidebar">
@@ -152,6 +214,15 @@ export function Sidebar({
         <button
           type="button"
           role="tab"
+          aria-selected={tab === 'related'}
+          className={tab === 'related' ? 'is-active' : ''}
+          onClick={() => onTabChange('related')}
+        >
+          <Target size={15} /> 相关
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={tab === 'outline'}
           className={tab === 'outline' ? 'is-active' : ''}
           onClick={() => onTabChange('outline')}
@@ -166,28 +237,67 @@ export function Sidebar({
             <FilePlus2 size={16} /> 新建文稿
           </button>
           <div className="doc-list">
-            {documents.map((doc) => (
-              <div key={doc.id} className={`doc-row${doc.id === activeId ? ' is-active' : ''}`}>
-                <button type="button" className="doc-row-main" onClick={() => onSelectDocument(doc.id)}>
-                  <span className="doc-row-title">{doc.title || '未命名文稿'}</span>
-                  <span className="doc-row-time">{relativeTime(doc.updatedAt)}</span>
-                </button>
-                <button
-                  type="button"
-                  className="doc-row-delete"
-                  title="删除文稿"
-                  aria-label={`删除文稿：${doc.title || '未命名文稿'}`}
-                  onClick={() => setPendingDelete(doc)}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
+            {documents.length === 0 ? (
+              <EmptyState kind="empty">还没有文稿，点上方新建一份</EmptyState>
+            ) : (
+              documents.map((doc) => (
+                <div key={doc.id} className={`doc-row${doc.id === activeId ? ' is-active' : ''}`}>
+                  <button
+                    type="button"
+                    className="doc-row-main"
+                    onClick={() => onSelectDocument(doc.id)}
+                  >
+                    <span className="doc-row-title">{doc.title || '未命名文稿'}</span>
+                    <span className="doc-row-time">{relativeTime(doc.updatedAt)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="doc-row-delete"
+                    title="删除文稿"
+                    aria-label={`删除文稿：${doc.title || '未命名文稿'}`}
+                    onClick={() => setPendingDelete(doc)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}
 
-      {tab === 'outline' && <OutlinePanel outline={outline} onSelect={onSelectOutline} />}
+      {tab === 'outline' && (
+        <OutlinePanel
+          outline={outline}
+          coverage={coverage}
+          claimCounts={claimCounts}
+          claimTotal={claimTotal}
+          onSelect={onSelectOutline}
+        />
+      )}
+
+      {tab === 'related' && (
+        <RelatedPanel
+          context={context}
+          hits={relatedHits}
+          associations={associations}
+          citationIndex={citationIndex}
+          usage={cardUsage}
+          knowledge={knowledge}
+          documentId={activeId}
+          feedback={cardFeedback}
+          glossary={glossary}
+          library={library}
+          suggest={suggest}
+          onInsert={onInsertCard}
+          onFocus={onFocusCard}
+          onSearchLibrary={onSearchLibrary}
+          onFocusNote={onFocusNote}
+          onInsertNote={onInsertNote}
+          onOpenDocument={onOpenDocument}
+          onSelectCitation={onSelectCitation}
+        />
+      )}
 
       {tab === 'cards' && (
         <div className="sidebar-panel cards-panel">
@@ -201,10 +311,11 @@ export function Sidebar({
             />
           </label>
 
-          <div className="card-list">
-            {loadingCards && <div className="sidebar-empty">正在读取卡片…</div>}
+          <div className="card-list-wrap">
+            <div className="card-list" ref={cardScrollerRef}>
+            {loadingCards && <EmptyState className="sidebar-empty">正在读取卡片…</EmptyState>}
             {!loadingCards && cards.length === 0 && (
-              <div className="sidebar-empty">{emptyMessage(connection, cardQuery)}</div>
+              <EmptyState className="sidebar-empty">{emptyMessage(connection, cardQuery)}</EmptyState>
             )}
             {cards.map((card) => {
               const inserted = insertedCounts.get(card.id) ?? 0
@@ -231,12 +342,10 @@ export function Sidebar({
                       : '点击插入到光标位置，或拖入正文'
                   }
                 >
-                  <span className="side-card-accent" data-tone={cardColorIndex(card.colorIndex)} />
+                  <span className="side-card-accent" data-kind={card.kind} />
                   <span className="side-card-body">
-                    <span className="side-card-title">{summary.title}</span>
-                    {summary.excerpt && (
-                      <span className="side-card-excerpt">{summary.excerpt}</span>
-                    )}
+                    <CardHeading summary={summary} className="side-card-title" />
+                    {summary.body && <span className="side-card-excerpt">{summary.body}</span>}
                     {summary.detail && <span className="side-card-meta">{summary.detail}</span>}
                     {(isCurrent || inserted > 0 || tags.length > 0) && (
                       <span className="side-card-tags">
@@ -258,6 +367,9 @@ export function Sidebar({
                 </button>
               )
             })}
+            </div>
+            <span className={'card-fade is-top' + (cardFadeTop ? ' is-visible' : '')} />
+            <span className={'card-fade is-bottom' + (cardFadeBottom ? ' is-visible' : '')} />
           </div>
         </div>
       )}

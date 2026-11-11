@@ -1,13 +1,25 @@
 import type { Editor } from '@tiptap/core'
 import { useEditorState } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
-import { Bold, Code2, Highlighter, Italic, Link2, Strikethrough, Underline } from 'lucide-react'
+import {
+  Bold,
+  Code2,
+  Highlighter,
+  Italic,
+  Link2,
+  Sparkles,
+  Strikethrough,
+  Underline,
+} from 'lucide-react'
+import { readWritingContext } from '../lib/context'
+import type { AssistRange } from './AssistantPanel'
 
 interface BubbleToolbarProps {
   editor: Editor
+  onAssist: (range: AssistRange) => void
 }
 
-export function BubbleToolbar({ editor }: BubbleToolbarProps) {
+export function BubbleToolbar({ editor, onAssist }: BubbleToolbarProps) {
   const state = useEditorState({
     editor,
     selector: ({ editor: current }) => ({
@@ -30,6 +42,22 @@ export function BubbleToolbar({ editor }: BubbleToolbarProps) {
       return
     }
     editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+  }
+
+  /** 打开段落助手，选区在打开之前先行记录。 */
+  const openAssistant = () => {
+    const { from, to } = editor.state.selection
+    if (from === to) return
+    // 语境随选区一起取快照。面板打开以后光标可能移走，
+    // 实时读取会把别的段落带进这次生成。
+    const context = readWritingContext(editor)
+    onAssist({
+      from,
+      to,
+      text: editor.state.doc.textBetween(from, to, '\n'),
+      heading: context?.heading,
+      previous: context?.previous,
+    })
   }
 
   return (
@@ -97,6 +125,10 @@ export function BubbleToolbar({ editor }: BubbleToolbarProps) {
           title="链接"
         >
           <Link2 size={15} strokeWidth={2} />
+        </button>
+        <span className="bubble-sep" />
+        <button type="button" onClick={openAssistant} title="段落助手">
+          <Sparkles size={15} strokeWidth={1.8} />
         </button>
       </div>
     </BubbleMenu>

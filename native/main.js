@@ -26,6 +26,12 @@ function handlePanelMessage(addon, name, payload) {
   if (name === "documents:save") {
     return __MN_WRITER_STORAGE__.saveDocuments(payload);
   }
+  if (name === "knowledge:load") {
+    return __MN_WRITER_STORAGE__.loadKnowledge();
+  }
+  if (name === "knowledge:save") {
+    return __MN_WRITER_STORAGE__.saveKnowledge(payload);
+  }
   if (name === "media:read") {
     return __MN_WRITER_MEDIA__.read(payload);
   }

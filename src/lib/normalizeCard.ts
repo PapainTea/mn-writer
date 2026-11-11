@@ -79,6 +79,7 @@ export function normalizeCard(value: unknown): MnCard | null {
   return {
     id: card.id,
     title: typeof card.title === 'string' ? card.title : '',
+    preview: typeof card.preview === 'string' ? card.preview : undefined,
     excerpt: typeof card.excerpt === 'string' ? card.excerpt : '',
     excerptHtml: typeof card.excerptHtml === 'string' ? card.excerptHtml : undefined,
     media: readMedia(card.media),

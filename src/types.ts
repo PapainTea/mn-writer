@@ -26,7 +26,14 @@ export interface MnMedia {
 
 export interface MnCard {
   id: string
+  /** 卡片标题。卡片没有标题时为空串。 */
   title: string
+  /**
+   * 宿主的显示预览：有标题时是标题，没有标题时取正文首段。
+   *
+   * 预览不等于标题，界面不用预览充当标题。
+   */
+  preview?: string
   excerpt: string
   /** 卡片自带的富文本 HTML；存在时优先按 HTML 渲染。 */
   excerptHtml?: string
@@ -50,6 +57,10 @@ export interface WriterDocument {
   updatedAt: number
   /** 内置演示文稿的版本号，用于在模板更新时替换旧版本。 */
   seedVersion?: number
+  /** 卡片最近一次被正文引用的时间，键为卡片标识。 */
+  cardUsage?: Record<string, number>
+  /** 作者对检索结果的判断，键为卡片标识，值为 1 或 -1。 */
+  cardFeedback?: Record<string, 1 | -1>
 }
 
 export interface OutlineItem {
@@ -80,7 +91,31 @@ export interface MnAdapter {
   getCards(ids: string[]): Promise<MnCard[]>
   getSelectedCardIds(): Promise<string[]>
   focusCard(id: string): void
+  locateDocument(id: string): Promise<boolean>
+  searchLibrary(query: string): Promise<LibrarySearchResult>
   getConnection(): MnConnection
   subscribeConnection(listener: () => void): () => void
   subscribeChange(listener: () => void): () => void
+}
+
+/** 资料库里的卡片命中。 */
+export interface LibraryNoteHit {
+  id: string
+  title: string
+  snippet: string
+  topicId?: string
+  topicTitle?: string
+}
+
+/** 资料库里的文献命中。 */
+export interface LibraryDocumentHit {
+  id: string
+  title: string
+}
+
+export interface LibrarySearchResult {
+  notes: LibraryNoteHit[]
+  documents: LibraryDocumentHit[]
+  /** 扫描窗口没有覆盖全部结果。 */
+  truncated: boolean
 }

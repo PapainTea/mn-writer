@@ -5,6 +5,7 @@ import {
   Copy,
   ExternalLink,
   GripVertical,
+  Network,
   MoreHorizontal,
   Quote,
   RefreshCw,
@@ -26,14 +27,15 @@ import {
 import { CommentBody, renderCommentHtml } from '../lib/commentRender'
 import { RichContent } from '../lib/RichContent'
 import { CardMedia } from '../components/CardMedia'
+import { CardHeading } from '../components/CardHeading'
 import { copyPlainText, copyRichContent } from '../lib/clipboard'
 import { pruneDuplicateText, rewriteMediaRefs } from '../lib/mediaHtml'
 import { compareTextKey, readMediaRefs } from '../lib/htmlText'
+import { openRelatedCards } from '../lib/relatedCardsEvent'
 import { showToast } from '../lib/toast'
 import { useCardMedia } from '../hooks/useCardMedia'
 import { getAdapter } from '../mn'
 import type { MnCard, MnMedia } from '../types'
-import { cardColorIndex } from './cardColors'
 
 const LONG_EXCERPT_LENGTH = 150
 
@@ -265,6 +267,16 @@ export function CardNodeView({
           <button type="button" role="menuitem" onClick={refreshCard}>
             <RefreshCw size={14} /> 刷新卡片内容
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              openRelatedCards(card)
+              setMenuOpen(false)
+            }}
+          >
+            <Network size={14} /> 相关卡片
+          </button>
           <button type="button" role="menuitem" onClick={convertToText}>
             <Type size={14} /> 转为文本
           </button>
@@ -316,7 +328,7 @@ export function CardNodeView({
     <NodeViewWrapper
       ref={rootRef}
       className={`mn-card-block${selected ? ' is-selected' : ''}${compact ? ' is-compact' : ''}`}
-      data-tone={cardColorIndex(card.colorIndex)}
+      data-kind={card.kind}
       onDoubleClick={handleDoubleClick}
     >
       {compact ? (
@@ -324,17 +336,17 @@ export function CardNodeView({
           <span className="mn-card-grip" data-drag-handle title="拖动卡片">
             <GripVertical size={15} strokeWidth={1.8} />
           </span>
-          <button
-            type="button"
-            className="mn-card-compact-main"
-            onClick={() => setExpanded(true)}
-            title="展开卡片"
-          >
-            <span className="mn-card-compact-title">{summary.title}</span>
-            {summary.excerpt && (
-              <span className="mn-card-compact-excerpt">{summary.excerpt}</span>
-            )}
-          </button>
+          <div className="mn-card-compact-main">
+            <button
+              type="button"
+              className="mn-card-compact-title"
+              onClick={() => setExpanded(true)}
+              title="展开卡片"
+            >
+              <CardHeading summary={summary} className="mn-card-compact-title-text" />
+            </button>
+            {summary.body && <span className="mn-card-compact-excerpt">{summary.body}</span>}
+          </div>
           <button
             type="button"
             className="mn-icon-button mn-card-expand"
@@ -357,7 +369,7 @@ export function CardNodeView({
             {tools}
           </div>
 
-          <h3 className="mn-card-title">{summary.title}</h3>
+          {summary.title && <h3 className="mn-card-title">{summary.title}</h3>}
           {renderExcerpt()}
           {longExcerpt && (
             <button

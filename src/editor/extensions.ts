@@ -6,7 +6,9 @@ import { TableKit } from '@tiptap/extension-table'
 import TaskItem from '@tiptap/extension-task-item'
 import TaskList from '@tiptap/extension-task-list'
 import { CardBlock } from './CardBlock'
+import { Citation } from './citationPlugin'
 import { CrossReference } from './crossRef'
+import { Evidence } from './evidencePlugin'
 import { FootnoteReference } from './footnote'
 import { OutlineFlash } from './OutlineFlash'
 import { SlashCommand } from './SlashCommand'
@@ -41,6 +43,8 @@ export function createExtensions(options: ExtensionOptions) {
     FootnoteReference,
     CrossReference,
     CardBlock,
+    Evidence,
+    Citation,
     OutlineFlash,
     SlashCommand.configure({
       onInsertCard: options.onInsertCard,

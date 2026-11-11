@@ -55,7 +55,7 @@ export const CardBlock = Node.create({
         'data-card': card ? JSON.stringify(card) : '',
         class: 'mn-card-static',
       },
-      card?.title ?? 'MarginNote 卡片',
+      card?.title || 'MarginNote 卡片',
     ]
   },
 

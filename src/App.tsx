@@ -1,52 +1,73 @@
 import type { Editor, JSONContent } from '@tiptap/core'
-import { NodeSelection } from '@tiptap/pm/state'
-import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
+import { EditorContent, useEditorState } from '@tiptap/react'
 import { Square } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { BubbleToolbar } from './components/BubbleToolbar'
+import { AssistantPanel, type AssistRange } from './components/AssistantPanel'
 import { CardPicker } from './components/CardPicker'
 import { CrossRefPicker } from './components/CrossRefPicker'
 import { FootnoteDialog } from './components/FootnoteDialog'
+import { ParagraphSurface } from './components/ParagraphSurface'
+import { RelatedCardsDialog } from './components/RelatedCardsDialog'
+import { ModelSettingsDialog } from './components/ModelSettingsDialog'
 import { ResizeGrip } from './components/ResizeGrip'
 import { Sidebar } from './components/Sidebar'
 import { StatsPanel } from './components/StatsPanel'
 import { TopBar } from './components/TopBar'
-import { takeDraggedCard } from './editor/dragCard'
+import { citationPluginKey, selectCitation } from './editor/citationPlugin'
+import { setCitationCards } from './editor/citationRegistry'
 import { loadDocumentContent } from './editor/documentLoad'
 import { createExtensions } from './editor/extensions'
-import { insertCardBlock } from './editor/insertCard'
 import { registerSlashActions, slashActions } from './editor/slashActions'
 import { useCrossRefTargets, useDocumentInsertions } from './hooks/useDocumentInsertions'
 import { useDocumentExport } from './hooks/useDocumentExport'
+import { useCardLibrary } from './hooks/useCardLibrary'
+import { useCardRefresh } from './hooks/useCardRefresh'
+import { useCardFocus } from './hooks/useCardFocus'
+import { useCardInsertion } from './hooks/useCardInsertion'
 import { useEditorDerivedState } from './hooks/useEditorDerivedState'
+import { useKnowledge } from './hooks/useKnowledge'
+import { useLibraryActions } from './hooks/useLibraryActions'
+import { useWritingEvidence } from './hooks/useWritingEvidence'
 import { useSelectedCardIds } from './hooks/useSelectedCardId'
 import { useWriterDocuments } from './hooks/useWriterDocuments'
+import { useWriterEditor } from './hooks/useWriterEditor'
+import { useSnapshotSync } from './hooks/useSnapshotSync'
 import { getCardViewMode, setCardViewMode, subscribeCardView } from './lib/cardView'
+import { cardFeedbackMap, nextFeedback } from './lib/cardFeedback'
+import { cardUsageMap } from './lib/cardUsage'
+import { buildClaimIndex } from './lib/claims'
+import { EMPTY_CITATION_INDEX, type CitationEntry } from './lib/citationIndex'
+import { knowledgeCountMap } from './lib/knowledge'
 import { EMPTY_DOC } from './lib/document'
 import { pinSelectedCards } from './lib/cardOrder'
 import { filterCards } from './lib/cardSearch'
-import { countInsertedCards } from './lib/inserted'
-import { jumpToOutline } from './lib/outline'
+import { cardLabel } from './lib/cardSummary'
+import { jumpToOutline, jumpToPosition } from './lib/outline'
+import { subscribeRelatedCards } from './lib/relatedCardsEvent'
 import { usePanelSizeRestore } from './hooks/usePanelSizeRestore'
+import { useWriterShortcuts } from './hooks/useWriterShortcuts'
+import { useWriterTheme } from './hooks/useWriterTheme'
 import { collectDocumentStats } from './lib/documentStats'
 import { isCompactLayout, watchCompactLayout } from './lib/layout'
-import { loadTheme, persistTheme, type ThemeMode } from './lib/storage'
 import { subscribeToast } from './lib/toast'
 import { getAdapter } from './mn'
 import type { MnCard, OutlineItem } from './types'
 
 export default function App() {
-  const [theme, setTheme] = useState<ThemeMode>(() => loadTheme())
+  const [theme, setTheme] = useWriterTheme()
   const [sidebarOpen, setSidebarOpen] = useState(() => !isCompactLayout())
-  const [sidebarTab, setSidebarTab] = useState<'docs' | 'cards' | 'outline'>('cards')
+  const [sidebarTab, setSidebarTab] = useState<'docs' | 'cards' | 'related' | 'outline'>('cards')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
   const [focusMode, setFocusMode] = useState(false)
-  const [allCards, setAllCards] = useState<MnCard[]>([])
-  const [loadingCards, setLoadingCards] = useState(true)
   const [cardQuery, setCardQuery] = useState('')
   const [toast, setToast] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
+  const [relatedTarget, setRelatedTarget] = useState<MnCard | null>(null)
+  const [assistRange, setAssistRange] = useState<AssistRange | null>(null)
+  const [modelSettingsOpen, setModelSettingsOpen] = useState(false)
+  /** 文稿内容装载完成的次数，文稿切换后旧快照需要重新补齐。 */
+  const [loadedRevision, setLoadedRevision] = useState(0)
 
   const adapter = useMemo(() => getAdapter(), [])
   usePanelSizeRestore()
@@ -73,6 +94,8 @@ export default function App() {
     importDocument,
     deleteDocument,
     renameDocument,
+    recordCardUsage,
+    setCardFeedback,
   } = useWriterDocuments(handleStorageFailure)
 
   const scheduleSaveRef = useRef<(content: JSONContent, quiet?: boolean) => void>(() => undefined)
@@ -80,11 +103,22 @@ export default function App() {
     scheduleSaveRef.current = scheduleSave
   }, [scheduleSave])
 
+  /** 卡片在历次写作中的使用记录。 */
+  const { store: knowledge, record: recordKnowledge } = useKnowledge()
+
+  // 编辑器实例在文稿之间重建，拖拽插入时通过引用读取最新的记录函数。
+  const recordCardUseRef = useRef<(cardId: string) => void>(() => undefined)
+  useEffect(() => {
+    recordCardUseRef.current = (cardId: string) => {
+      recordCardUsage(cardId)
+      recordKnowledge(cardId, activeDocumentId, activeDocument?.title ?? '')
+    }
+  }, [activeDocument?.title, activeDocumentId, recordCardUsage, recordKnowledge])
+
   // 记录侧栏是否由宽度变化收起，用户主动关闭侧栏时不在恢复范围内。
   const autoClosedRef = useRef(false)
 
   const scheduleDerivedStateRef = useRef<(current: Editor) => void>(() => undefined)
-  const editorRef = useRef<Editor | null>(null)
 
   const extensions = useMemo(
     () =>
@@ -96,53 +130,40 @@ export default function App() {
     [],
   )
 
-  // 编辑器实例随文稿一起重建。
-  // ProseMirror 的撤销栈属于编辑器实例，若跨文稿共用同一个实例，
-  // 切换文稿后的撤销操作会回滚上一份文稿的编辑，并把那份内容写进当前文稿。
+  // 编辑器实例随文稿一起重建，理由见 useWriterEditor。
   const editorDocumentId = activeId
 
-  const editor = useEditor(
-    {
-      extensions,
-      content: activeDocument?.content ?? EMPTY_DOC,
-      editorProps: {
-        attributes: {
-          class: 'mn-editor',
-          spellcheck: 'true',
-        },
-        handleDrop: (view, event) => {
-          const card = takeDraggedCard()
-          if (!card) return false
-          const current = editorRef.current
-          if (!current) return false
-          const coords = view.posAtCoords({ left: event.clientX, top: event.clientY })
-          const position = coords?.pos ?? view.state.doc.content.size
-          if (!insertCardBlock(current, card, position)) return false
-          const count = countInsertedCards(current.getJSON()).get(card.id) ?? 1
-          setToast(
-            count > 1
-              ? `已插入「${card.title}」，正文共有 ${count} 处引用`
-              : `已插入「${card.title}」`,
-          )
-          event.preventDefault()
-          return true
-        },
-      },
-      shouldRerenderOnTransaction: false,
-      onUpdate: ({ editor: current }) => {
-        scheduleSaveRef.current(current.getJSON(), !current.isFocused)
-        scheduleDerivedStateRef.current(current)
-      },
-    },
-    [extensions, editorDocumentId],
-  )
+  const handleDropCard = useCallback((card: MnCard, count: number) => {
+    recordCardUseRef.current(card.id)
+    const label = cardLabel(card)
+    setToast(
+      count > 1 ? `已插入「${label}」，正文共有 ${count} 处引用` : `已插入「${label}」`,
+    )
+  }, [])
 
-  useEffect(() => {
-    editorRef.current = editor
-  }, [editor])
+  const handleEditorUpdate = useCallback((current: Editor) => {
+    scheduleSaveRef.current(current.getJSON(), !current.isFocused)
+    scheduleDerivedStateRef.current(current)
+  }, [])
 
-  const { outline, insertedCounts, syncDerivedState, scheduleDerivedState } =
-    useEditorDerivedState(editor)
+  const editor = useWriterEditor({
+    extensions,
+    content: activeDocument?.content ?? EMPTY_DOC,
+    documentId: editorDocumentId,
+    editable: Boolean(activeDocument),
+    onDropCard: handleDropCard,
+    onUpdate: handleEditorUpdate,
+  })
+
+  const {
+    outline,
+    insertedCounts,
+    glossary,
+    coverage,
+    claims,
+    syncDerivedState,
+    scheduleDerivedState,
+  } = useEditorDerivedState(editor)
   useEffect(() => {
     scheduleDerivedStateRef.current = scheduleDerivedState
   }, [scheduleDerivedState])
@@ -190,33 +211,20 @@ export default function App() {
       // 装载文稿属于结构替换，不进入撤销栈，也不触发自动保存。
       loadDocumentContent(editor, document.content)
       syncDerivedState(editor)
+      setLoadedRevision((value) => value + 1)
     }, 0)
     return () => window.clearTimeout(timer)
   }, [activeId, editor, getDocument, syncDerivedState])
 
-  const refreshSeq = useRef(0)
-  const refreshCards = useCallback(
-    async (options?: { silent?: boolean }) => {
-      const seq = refreshSeq.current + 1
-      refreshSeq.current = seq
-      if (!options?.silent) setLoadingCards(true)
-      try {
-        const list = await adapter.listCards()
-        if (seq === refreshSeq.current) setAllCards(list)
-      } catch {
-        if (seq === refreshSeq.current) setAllCards([])
-      } finally {
-        if (seq === refreshSeq.current) setLoadingCards(false)
-      }
-    },
-    [adapter],
-  )
+  /** 学习集里的卡片。 */
+  const {
+    cards: allCards,
+    loading: loadingCards,
+    refresh: refreshCards,
+  } = useCardLibrary(adapter)
 
-  useEffect(() => {
-    // 挂载后读取一次学习集卡片，结果由 refreshCards 写回状态。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refreshCards()
-  }, [refreshCards])
+  /** 旧快照里的假标题按学习集里的真实标题补齐。 */
+  useSnapshotSync({ editor, cards: allCards, revision: loadedRevision })
 
   useEffect(() => {
     const unwatch = watchCompactLayout((compact) => {
@@ -240,42 +248,66 @@ export default function App() {
     [allCards, cardQuery, selectedCardIds],
   )
 
-  useEffect(
-    () =>
-      adapter.subscribeChange(() => {
-        void refreshCards({ silent: true })
-      }),
-    [adapter, refreshCards],
+  /** 正文里已经插入的卡片不再作为证据提示。 */
+  const insertedCardIds = useMemo(() => new Set(insertedCounts.keys()), [insertedCounts])
+
+  /** 当前文稿里卡片的使用痕迹。 */
+  const usage = useMemo(() => cardUsageMap(activeDocument), [activeDocument])
+
+  /** 当前文稿里作者对检索结果的判断。 */
+  const feedback = useMemo(() => cardFeedbackMap(activeDocument), [activeDocument])
+  const usageCounts = useMemo(() => knowledgeCountMap(knowledge), [knowledge])
+
+  /** 引用与学习集卡片的对应关系由插件维护，界面层从插件状态读取。 */
+  useEffect(() => {
+    setCitationCards(allCards)
+    if (!editor) return
+    editor.view.dispatch(editor.state.tr.setMeta(citationPluginKey, {}))
+  }, [allCards, editor])
+
+  const citationIndex = useEditorState({
+    editor,
+    selector: ({ editor: current }) => {
+      if (!current) return EMPTY_CITATION_INDEX
+      return citationPluginKey.getState(current.state)?.index ?? EMPTY_CITATION_INDEX
+    },
+    equalityFn: (left, right) => left === right,
+  })
+
+  /** 写作当下浮现的相关卡片，以及证据条与助手共用的证据。 */
+  const {
+    context,
+    hits: relatedHits,
+    associations,
+    evidence: evidenceHits,
+    suggest,
+  } = useWritingEvidence(editor, allCards, insertedCardIds, {
+    feedback,
+    usage: usageCounts,
+    citationIndex,
+  })
+
+  const handleSelectCitation = useCallback(
+    (entry: CitationEntry) => {
+      if (!editor) return
+      selectCitation(editor, entry)
+    },
+    [editor],
   )
 
-  useEffect(() => {
-    const refresh = () => {
-      void refreshCards({ silent: true })
-    }
-    window.addEventListener('focus', refresh)
-    return () => window.removeEventListener('focus', refresh)
-  }, [refreshCards])
+  /** 缺少证据的断言索引，供大纲面板显示与定位。 */
+  const claimIndex = useMemo(() => buildClaimIndex(claims), [claims])
 
-  useEffect(() => {
-    const root = document.documentElement
-    if (theme === 'system') root.removeAttribute('data-theme')
-    else root.dataset.theme = theme
-    persistTheme(theme)
-
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const applyThemeColor = () => {
-      const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme
-      document
-        .querySelector('meta[name="theme-color"]')
-        ?.setAttribute('content', effective === 'dark' ? '#121311' : '#f4f1ea')
-    }
-    applyThemeColor()
-    if (theme !== 'system') return
-    media.addEventListener('change', applyThemeColor)
-    return () => media.removeEventListener('change', applyThemeColor)
-  }, [theme])
+  const handleFeedback = useCallback(
+    (cardId: string, value: 1 | -1) => {
+      setCardFeedback(cardId, nextFeedback(feedback.get(cardId), value))
+    },
+    [feedback, setCardFeedback],
+  )
 
   useEffect(() => subscribeToast(setToast), [])
+
+  useEffect(() => subscribeRelatedCards(setRelatedTarget), [])
 
   useEffect(() => {
     if (!toast) return
@@ -283,33 +315,26 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [toast])
 
-  const insertCard = useCallback(
-    (card: MnCard) => {
-      if (!editor) return
-      const { selection } = editor.state
-      const cursor = selection.empty ? selection.$from : selection.$to
-      const position =
-        selection instanceof NodeSelection
-          ? selection.to
-          : cursor.depth > 0
-            ? cursor.after(1)
-            : selection.to
-      if (!insertCardBlock(editor, card, position)) {
-        setToast('插入失败，请重试')
-        return
-      }
-      const count = countInsertedCards(editor.getJSON()).get(card.id) ?? 1
-      syncDerivedState(editor)
-      setToast(
-        count > 1
-          ? `已插入「${card.title}」，正文共有 ${count} 处引用`
-          : `已插入「${card.title}」`,
-      )
-      setPickerOpen(false)
-      if (isCompactLayout()) setSidebarOpen(false)
-    },
-    [editor, syncDerivedState],
-  )
+  const recordUse = useCallback((cardId: string) => {
+    recordCardUseRef.current(cardId)
+  }, [])
+
+  const finishInsertion = useCallback(() => {
+    setPickerOpen(false)
+    if (isCompactLayout()) setSidebarOpen(false)
+  }, [])
+
+  const insertCard = useCardInsertion({
+    editor,
+    onToast: setToast,
+    onRecordUse: recordUse,
+    onSync: syncDerivedState,
+    onInserted: finishInsertion,
+  })
+
+  /** 资料库检索与资料库材料的相关操作。 */
+  const { library, onSearchLibrary, onFocusNote, onInsertNote, onOpenDocument } =
+    useLibraryActions({ adapter, insertCard, onToast: setToast })
 
   useEffect(() => {
     // 斜杠菜单请求插入脚注时执行插入。
@@ -318,64 +343,14 @@ export default function App() {
   }, [footnoteRequest, insertFootnote])
 
   /** 刷新正文内全部卡片内容，同时重新读取侧栏卡片列表。 */
-  const refreshAllCards = useCallback(async () => {
-    if (!editor || refreshing) return
-
-    const positions: { pos: number; cardId: string }[] = []
-    editor.state.doc.descendants((node, pos) => {
-      if (node.type.name !== 'cardBlock') return
-      const cardId =
-        typeof node.attrs.cardId === 'string' && node.attrs.cardId
-          ? node.attrs.cardId
-          : ((node.attrs.snapshot as { id?: string } | null)?.id ?? '')
-      if (cardId) positions.push({ pos, cardId })
-    })
-    if (positions.length === 0) {
-      setToast('正文没有插入卡片')
-      return
-    }
-
-    const documentId = activeDocumentId
-    setRefreshing(true)
-    try {
-      const ids = [...new Set(positions.map((item) => item.cardId))]
-      const cards = await adapter.getCards(ids)
-      const byId = new Map(cards.map((card) => [card.id, card]))
-      const failed = ids.filter((id) => !byId.has(id))
-
-      if (activeDocumentId !== documentId) return
-
-      const tr = editor.state.tr
-      // 位置倒序更新，避免前面的替换影响后面的偏移量。
-      for (const item of [...positions].reverse()) {
-        const card = byId.get(item.cardId)
-        if (!card) continue
-        const node = editor.state.doc.nodeAt(item.pos)
-        if (!node || node.type.name !== 'cardBlock') continue
-        tr.setNodeMarkup(item.pos, undefined, {
-          ...node.attrs,
-          cardId: card.id,
-          snapshot: card,
-        })
-      }
-      if (tr.steps.length > 0) editor.view.dispatch(tr)
-
-      syncDerivedState(editor)
-      void refreshCards({ silent: true })
-
-      if (failed.length === 0) {
-        setToast('已刷新所有卡片内容')
-      } else if (cards.length === 0) {
-        setToast('刷新失败，请稍后重试')
-      } else {
-        setToast(`已刷新 ${cards.length} 张卡片，${failed.length} 张刷新失败`)
-      }
-    } catch {
-      setToast('刷新失败，请稍后重试')
-    } finally {
-      setRefreshing(false)
-    }
-  }, [adapter, activeDocumentId, editor, refreshCards, refreshing, syncDerivedState])
+  const { refreshing, refreshAllCards } = useCardRefresh({
+    editor,
+    adapter,
+    documentId: activeDocumentId,
+    onRefreshed: refreshCards,
+    onToast: setToast,
+    syncDerivedState,
+  })
 
   const handleSelectDocument = useCallback(
     (id: string) => {
@@ -398,35 +373,16 @@ export default function App() {
   const selectOutline = useCallback(
     (item: OutlineItem) => {
       if (!editor) return
-      jumpToOutline(editor, item)
+      const target = claimIndex.targets.get(item.id)
+      if (target === undefined) {
+        jumpToOutline(editor, item)
+      } else {
+        jumpToPosition(editor, target)
+      }
       if (isCompactLayout()) setSidebarOpen(false)
     },
-    [editor],
+    [editor, claimIndex.targets],
   )
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const modifier = event.metaKey || event.ctrlKey
-      if (modifier && !event.altKey && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        setPickerOpen(true)
-        return
-      }
-      if (modifier && !event.altKey && event.key.toLowerCase() === 's') {
-        event.preventDefault()
-        setToast(flushSave() ? '文稿已保存到本地' : '保存失败，请导出 JSON 备份')
-        return
-      }
-      if (modifier && event.shiftKey && event.key.toLowerCase() === 'f') {
-        event.preventDefault()
-        setFocusMode((value) => !value)
-        return
-      }
-      if (event.key === 'Escape' && !pickerOpen && focusMode) setFocusMode(false)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [flushSave, focusMode, pickerOpen])
 
   const { copyMarkdown, downloadMarkdown, downloadJson, importJson } = useDocumentExport({
     editor,
@@ -434,6 +390,19 @@ export default function App() {
     onToast: setToast,
     importDocument,
   })
+
+  useWriterShortcuts({
+    pickerOpen,
+    focusMode,
+    onOpenPicker: () => setPickerOpen(true),
+    onToggleFocus: () => setFocusMode((value) => !value),
+    onSave: () => {
+      setToast(flushSave() ? '文稿已保存到本地' : '保存失败，请导出 JSON 备份')
+    },
+  })
+
+  /** 在 MarginNote 的脑图里定位到指定卡片。 */
+  const focusCard = useCardFocus(adapter, setToast)
 
   return (
     <div className={`app${sidebarOpen ? '' : ' sidebar-closed'}${focusMode ? ' is-focus' : ''}`}>
@@ -449,6 +418,9 @@ export default function App() {
             cardQuery={cardQuery}
             loadingCards={loadingCards}
             outline={outline}
+            coverage={coverage}
+            claimCounts={claimIndex.counts}
+            claimTotal={claimIndex.total}
             connection={connection}
             onRetryConnection={() => void refreshCards()}
             onSelectDocument={handleSelectDocument}
@@ -459,6 +431,22 @@ export default function App() {
             onSelectOutline={selectOutline}
             onClose={() => setSidebarOpen(false)}
             selectedCardIds={selectedCardIds}
+            context={context}
+            relatedHits={relatedHits}
+            associations={associations}
+            citationIndex={citationIndex}
+            cardUsage={usage}
+            knowledge={knowledge}
+            cardFeedback={feedback}
+            glossary={glossary}
+            library={library}
+            suggest={suggest}
+            onFocusCard={focusCard}
+            onSearchLibrary={onSearchLibrary}
+            onFocusNote={onFocusNote}
+            onInsertNote={onInsertNote}
+            onOpenDocument={onOpenDocument}
+            onSelectCitation={handleSelectCitation}
           />
           <button
             type="button"
@@ -475,6 +463,7 @@ export default function App() {
           <TopBar
             title={activeDocument?.title ?? ''}
             onTitleChange={renameDocument}
+            hasDocument={Boolean(activeDocument)}
             saveState={saveState}
             editor={editor}
             theme={theme}
@@ -519,7 +508,41 @@ export default function App() {
         )}
       </main>
 
-      {editor && !focusMode && <BubbleToolbar editor={editor} />}
+      {editor && !focusMode && (
+        <BubbleToolbar editor={editor} onAssist={(range) => setAssistRange(range)} />
+      )}
+
+      <AssistantPanel
+        range={assistRange}
+        editor={editor}
+        hits={relatedHits}
+        documentTitle={activeDocument?.title ?? ''}
+        glossary={glossary}
+        key={assistRange ? `${assistRange.from}-${assistRange.to}` : 'assistant'}
+        onClose={() => setAssistRange(null)}
+        onOpenSettings={() => setModelSettingsOpen(true)}
+        onToast={setToast}
+        onFocusCard={focusCard}
+      />
+
+      <ModelSettingsDialog
+        open={modelSettingsOpen}
+        onClose={() => setModelSettingsOpen(false)}
+        onToast={setToast}
+      />
+
+      <ParagraphSurface
+        editor={editor}
+        hits={evidenceHits}
+        usage={usage}
+        knowledge={knowledge}
+        documentId={activeDocumentId}
+        feedback={feedback}
+        onInsert={insertCard}
+        onFocus={focusCard}
+        onFeedback={handleFeedback}
+        onSearchLibrary={onSearchLibrary}
+      />
 
       <CardPicker
         open={pickerOpen}
@@ -539,6 +562,15 @@ export default function App() {
       />
 
       <StatsPanel open={statsOpen} stats={stats} onClose={() => setStatsOpen(false)} />
+
+      <RelatedCardsDialog
+        card={relatedTarget}
+        cards={allCards}
+        key={relatedTarget?.id ?? 'related-cards'}
+        onClose={() => setRelatedTarget(null)}
+        onInsert={insertCard}
+        onFocus={focusCard}
+      />
 
       <FootnoteDialog />
 

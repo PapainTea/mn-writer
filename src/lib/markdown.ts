@@ -1,6 +1,7 @@
 import type { JSONContent } from '@tiptap/core'
 import type { MnCard } from '../types'
 import { blockPlainText, cardContentBlocks } from './cardContent'
+import { CARD_KIND_LABEL } from './cardSummary'
 
 function inlineToMarkdown(node: JSONContent, footnotes: Map<JSONContent, number>): string {
   if (node.type === 'hardBreak') return '  \n'
@@ -47,8 +48,9 @@ function cardToMarkdown(card: MnCard, id: string): string {
   const meta = [card.documentTitle, card.page ? `p.${card.page}` : '', card.citationKey]
     .filter(Boolean)
     .join(' · ')
-  const lines = [`> [!mn-card] ${card.title}`]
-  const title = card.title.trim()
+  // 卡片没有标题时用卡片类型占位，导出的标题行不留空。
+  const title = card.title.trim() || CARD_KIND_LABEL[card.kind]
+  const lines = [`> [!mn-card] ${title}`]
   for (const block of cardContentBlocks(card)) {
     if (block.kind === 'media') {
       const caption = block.media.caption?.trim() || block.media.alt

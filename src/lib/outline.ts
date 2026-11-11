@@ -20,3 +20,14 @@ export function jumpToOutline(editor: Editor, item: OutlineItem): void {
   editor.chain().focus().setTextSelection(item.pos + 1).scrollIntoView().run()
   flashHeading(editor, item.pos, node.nodeSize)
 }
+
+/**
+ * 定位到正文里的一个位置。
+ *
+ * 用于跳到缺少证据的断言这类正文位置。
+ */
+export function jumpToPosition(editor: Editor, pos: number): void {
+  const node = editor.state.doc.nodeAt(pos)
+  if (!node) return
+  editor.chain().focus().setTextSelection(pos + 1).scrollIntoView().run()
+}

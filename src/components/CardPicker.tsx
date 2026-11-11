@@ -1,10 +1,11 @@
 import { Check, CircleDot, CornerDownLeft, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { cardColorIndex } from '../editor/cardColors'
 import { pinSelectedCards } from '../lib/cardOrder'
 import { filterCards } from '../lib/cardSearch'
 import { cardSummary } from '../lib/cardSummary'
 import type { MnCard } from '../types'
+import { CardHeading } from './CardHeading'
+import { EmptyState } from './EmptyState'
 
 interface CardPickerProps {
   open: boolean
@@ -111,8 +112,16 @@ export function CardPicker({
         </div>
 
         <div className="picker-list" role="listbox">
-          {loading && <div className="picker-empty">正在读取卡片…</div>}
-          {!loading && filtered.length === 0 && <div className="picker-empty">没有找到匹配的卡片</div>}
+          {loading && (
+            <EmptyState className="picker-empty" kind="loading">
+              正在读取卡片…
+            </EmptyState>
+          )}
+          {!loading && filtered.length === 0 && (
+            <EmptyState className="picker-empty" kind="failed">
+              没有找到匹配的卡片
+            </EmptyState>
+          )}
           {filtered.map((card, index) => {
             const inserted = insertedCounts.get(card.id) ?? 0
             const summary = cardSummary(card)
@@ -130,10 +139,10 @@ export function CardPicker({
                   onClose()
                 }}
               >
-                <span className="picker-accent" data-tone={cardColorIndex(card.colorIndex)} />
+                <span className="picker-accent" data-kind={card.kind} />
                 <span className="picker-body">
-                  <span className="picker-title">{summary.title}</span>
-                  {summary.excerpt && <span className="picker-excerpt">{summary.excerpt}</span>}
+                  <CardHeading summary={summary} className="picker-title" />
+                  {summary.body && <span className="picker-excerpt">{summary.body}</span>}
                   <span className="picker-meta">
                     {summary.detail}
                     {card.citationKey ? ` · @${card.citationKey}` : ''}

@@ -3,6 +3,7 @@ var __MN_WRITER_STORAGE__ = (function () {
   var LEGACY_DOCUMENTS_KEY = "mn-writer:documents:v1";
   var DIRECTORY_NAME = "MNWriter";
   var DOCUMENTS_FILE = "documents.json";
+  var KNOWLEDGE_FILE = "knowledge.json";
   var UTF8_ENCODING = 4;
 
   function store() {
@@ -26,6 +27,11 @@ var __MN_WRITER_STORAGE__ = (function () {
   function documentsPath() {
     var directory = directoryPath();
     return directory ? directory + "/" + DOCUMENTS_FILE : null;
+  }
+
+  function knowledgePath() {
+    var directory = directoryPath();
+    return directory ? directory + "/" + KNOWLEDGE_FILE : null;
   }
 
   function ensureDirectory(path) {
@@ -138,10 +144,38 @@ var __MN_WRITER_STORAGE__ = (function () {
     return { ok: true };
   }
 
+  /**
+   * 读取跨文稿的卡片使用记录。
+   *
+   * 记录随作者积累，独立于文稿保存在单独的文件里。
+   */
+  function loadKnowledge() {
+    var path = knowledgePath();
+    if (!path) return { value: null };
+    return { value: readFile(path) };
+  }
+
+  function saveKnowledge(payload) {
+    var text = payload && typeof payload.value === "string" ? payload.value : "";
+    var path = knowledgePath();
+    var written = Boolean(path && ensureDirectory(directoryPath()) && writeFile(path, text));
+    if (!written) {
+      try {
+        store().setObjectForKey(text, scopedKey("mn-writer:knowledge:v1"));
+      } catch (error) {
+        throw new Error("知识记录写入失败", { cause: error });
+      }
+      return { ok: false, fallback: true };
+    }
+    return { ok: true };
+  }
+
   return {
     load: load,
     save: save,
     loadDocuments: loadDocuments,
     saveDocuments: saveDocuments,
+    loadKnowledge: loadKnowledge,
+    saveKnowledge: saveKnowledge,
   };
 })();

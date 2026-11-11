@@ -1,5 +1,6 @@
 import type { WriterDocument } from '../types'
 import { callNative, nativeBridgeAvailable } from '../mn/native'
+import { parseKnowledge, type KnowledgeStore } from './knowledge'
 import { normalizeContent } from './normalizeCard'
 import { createSeedDocument, SEED_VERSION } from './seed'
 
@@ -9,6 +10,9 @@ export const STORAGE_KEYS = {
   theme: 'mn-writer:theme:v1',
   cardView: 'mn-writer:card-view:v1',
   panelSize: 'mn-writer:panel-size',
+  llmEndpoint: 'mn-writer:llm-endpoint:v1',
+  llmModel: 'mn-writer:llm-model:v1',
+  knowledge: 'mn-writer:knowledge:v1',
 } as const
 
 /** 写在 NSUserDefaults 里的轻量设置。 */
@@ -17,10 +21,13 @@ const PREFERENCE_KEYS = [
   STORAGE_KEYS.theme,
   STORAGE_KEYS.cardView,
   STORAGE_KEYS.panelSize,
+  STORAGE_KEYS.llmEndpoint,
+  STORAGE_KEYS.llmModel,
 ]
 const DOCS_KEY = STORAGE_KEYS.documents
 const ACTIVE_KEY = STORAGE_KEYS.activeId
 const THEME_KEY = STORAGE_KEYS.theme
+const KNOWLEDGE_KEY = STORAGE_KEYS.knowledge
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
@@ -89,8 +96,18 @@ export function bootstrapStorage(): Promise<void> {
         const backup = readLocalValue(DOCS_KEY)
         if (backup !== null) values.set(DOCS_KEY, backup)
       }
+      try {
+        const result = await callNative<{ value?: string | null }>(
+          'knowledge:load',
+          undefined,
+          4_000,
+        )
+        if (typeof result?.value === 'string') values.set(KNOWLEDGE_KEY, result.value)
+      } catch {
+        // 知识记录读取失败时按空记录启动。
+      }
     } else {
-      for (const key of [...PREFERENCE_KEYS, DOCS_KEY]) {
+      for (const key of [...PREFERENCE_KEYS, DOCS_KEY, KNOWLEDGE_KEY]) {
         const value = readLocalValue(key)
         if (value !== null) values.set(key, value)
       }
@@ -124,7 +141,9 @@ export function loadDocuments(): WriterDocument[] {
     const raw = readStoredValue(DOCS_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as WriterDocument[]
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
+        // 作者主动删光了文稿，此时保持空列表，不重新塞回内置演示文稿。
+        if (parsed.length === 0) return []
         const seed = createSeedDocument()
         return parsed.map((doc) => {
           // 内置演示文稿的版本落后时替换为当前版本，用户自己的文稿保持原样。
@@ -136,6 +155,7 @@ export function loadDocuments(): WriterDocument[] {
   } catch {
     // 损坏的本地数据回落到示例文稿，避免空白界面。
   }
+  // 从未写过文稿数据，属于首次启动，给出内置演示文稿。
   return [createSeedDocument()]
 }
 
@@ -174,4 +194,24 @@ export function loadTheme(): ThemeMode {
 
 export function persistTheme(theme: ThemeMode): void {
   writeStoredValue(THEME_KEY, theme)
+}
+
+/** 读取跨文稿的卡片使用记录。 */
+export function loadKnowledgeStore(): KnowledgeStore {
+  return parseKnowledge(readStoredValue(KNOWLEDGE_KEY))
+}
+
+/** 写入跨文稿的卡片使用记录。 */
+export function persistKnowledgeStore(store: KnowledgeStore): boolean {
+  const value = JSON.stringify(store)
+  if (cache) cache.set(KNOWLEDGE_KEY, value)
+  if (nativeBridgeAvailable()) {
+    void callNative('knowledge:save', { value }).catch(() => {
+      // 文件写入失败时退回浏览器本地存储，避免丢失记录。
+      writeLocalValue(KNOWLEDGE_KEY, value)
+    })
+    return true
+  }
+  writeLocalValue(KNOWLEDGE_KEY, value)
+  return true
 }

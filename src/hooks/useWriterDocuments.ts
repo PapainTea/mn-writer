@@ -212,28 +212,13 @@ export function useWriterDocuments(onStorageFailure: () => void) {
       if (!documentsRef.current.some((doc) => doc.id === id)) return
       flushSave()
       const remaining = documentsRef.current.filter((doc) => doc.id !== id)
-      if (remaining.length > 0) {
-        documentsRef.current = remaining
-        setDocuments(remaining)
-        const nextActive = remaining[0]
-        if (id === activeId && nextActive) {
-          setActiveId(nextActive.id)
-          persistActiveId(nextActive.id)
-        }
-        return
-      }
-      const now = Date.now()
-      const fresh: WriterDocument = {
-        id: createId('doc'),
-        title: '未命名文稿',
-        content: EMPTY_DOC,
-        createdAt: now,
-        updatedAt: now,
-      }
-      documentsRef.current = [fresh]
-      setDocuments([fresh])
-      setActiveId(fresh.id)
-      persistActiveId(fresh.id)
+      documentsRef.current = remaining
+      setDocuments(remaining)
+      if (id !== activeId) return
+      // 删掉当前文稿时改选剩下的第一份；一份不剩时清空当前选择，正文回到空白。
+      const nextActive = remaining[0]
+      setActiveId(nextActive?.id ?? '')
+      persistActiveId(nextActive?.id ?? '')
     },
     [activeId, flushSave],
   )
@@ -247,6 +232,38 @@ export function useWriterDocuments(onStorageFailure: () => void) {
       setDocuments(next)
     },
     [activeId],
+  )
+
+  /** 记录卡片最近一次进入正文的时间。 */
+  const recordCardUsage = useCallback(
+    (cardId: string) => {
+      if (!activeDocumentId || !cardId) return
+      const now = Date.now()
+      const next = documentsRef.current.map((doc) => {
+        if (doc.id !== activeDocumentId) return doc
+        return { ...doc, cardUsage: { ...(doc.cardUsage ?? {}), [cardId]: now } }
+      })
+      documentsRef.current = next
+      setDocuments(next)
+    },
+    [activeDocumentId],
+  )
+
+  /** 记录作者对检索结果的判断。 */
+  const setCardFeedback = useCallback(
+    (cardId: string, value: 1 | -1 | undefined) => {
+      if (!activeDocumentId || !cardId) return
+      const next = documentsRef.current.map((doc) => {
+        if (doc.id !== activeDocumentId) return doc
+        const feedback = { ...(doc.cardFeedback ?? {}) }
+        if (value === undefined) delete feedback[cardId]
+        else feedback[cardId] = value
+        return { ...doc, cardFeedback: feedback }
+      })
+      documentsRef.current = next
+      setDocuments(next)
+    },
+    [activeDocumentId],
   )
 
   return {
@@ -263,5 +280,7 @@ export function useWriterDocuments(onStorageFailure: () => void) {
     importDocument,
     deleteDocument,
     renameDocument,
+    recordCardUsage,
+    setCardFeedback,
   }
 }

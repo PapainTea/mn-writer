@@ -1,6 +1,7 @@
 import type { MnAdapter, MnCard, MnConnection } from '../types'
 import { filterCards as filterCardsByQuery } from '../lib/cardSearch'
 import { loadCards, loadStudySetCards } from './cards'
+import { searchLibrary as searchLibraryInMn } from './library'
 import { callNative, nativeBridgeAvailable } from './native'
 import {
   BridgeCallError,
@@ -162,6 +163,24 @@ export function createBridgeAdapter(): MnAdapter {
         method: 'POST',
         body: topicId ? { topicid: topicId } : {},
       }).catch(() => undefined)
+    },
+    async searchLibrary(query: string) {
+      const trimmed = query.trim()
+      if (!trimmed) return { notes: [], documents: [], truncated: false }
+      try {
+        return await searchLibraryInMn(trimmed)
+      } catch {
+        // 检索失败时按无结果处理，写作过程不被打断。
+        return { notes: [], documents: [], truncated: false }
+      }
+    },
+    async locateDocument(id: string) {
+      try {
+        await callBridge(`/documents/${encodeURIComponent(id)}/locate`, { method: 'POST' })
+        return true
+      } catch {
+        return false
+      }
     },
     getConnection() {
       return connection

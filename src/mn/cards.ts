@@ -171,6 +171,24 @@ function readKind(card: NoteItem): CardKind {
   return 'note'
 }
 
+/**
+ * 卡片标题。
+ *
+ * `items[].title` 是完整的显示标题，卡片没有标题时为空串。
+ * `preview` 是正文首段的兜底，不能充当标题，
+ * 因此只有接口没有返回标题字段时才退回脑图节点。
+ */
+function readTitle(card: NoteItem, node: MindNode | undefined): string {
+  if (typeof card.title === 'string') return card.title.trim()
+  return (node?.title ?? '').trim()
+}
+
+/** 宿主的显示预览：有标题时是标题，没有标题时取正文首段。 */
+function readPreview(card: NoteItem, node: MindNode | undefined): string {
+  if (typeof card.preview === 'string') return card.preview.trim()
+  return (node?.preview ?? '').trim()
+}
+
 function toCard(
   card: NoteItem,
   node: MindNode | undefined,
@@ -184,7 +202,8 @@ function toCard(
   const media = collectMedia(card.parts, [...cardTexts(card), excerpt, richHtml ?? ''])
   return {
     id: card.noteid ?? node?.noteid ?? '',
-    title: card.title?.trim() || node?.title?.trim() || card.preview?.trim() || '未命名卡片',
+    title: readTitle(card, node),
+    preview: readPreview(card, node),
     excerpt,
     excerptHtml: richHtml,
     media: media.items,
